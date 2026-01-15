@@ -1,141 +1,175 @@
-import os
-import asyncio
-import logging
 import discord
 from discord.ext import commands
-from discord import app_commands
+import logging
 from dotenv import load_dotenv
-from supabase import create_client
-from datetime import datetime, timezone
+import os
+import asyncio
+from collections import defaultdict
 
-# ---------- ENV ----------
+# -----------------------
+# ENV / TOKEN
+# -----------------------
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# -----------------------
+# LOGGING
+# -----------------------
+handler = logging.FileHandler(
+    filename="discord.log",
+    encoding="utf-8",
+    mode="w"
+)
 
-# ---------- LOGGING ----------
-handler = logging.FileHandler("discord.log", encoding="utf-8", mode="w")
-
-# ---------- DISCORD ----------
+# -----------------------
+# INTENTS
+# -----------------------
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# -----------------------
+# BOT
+# -----------------------
+bot = commands.Bot(
+    command_prefix=None,  # slash-only
+    intents=intents
+)
 
-# ---------- CONFIG ----------
-TRACKED_CHANNELS = {
+# -----------------------
+# CHANNELS TO TRACK
+# -----------------------
+TRACK_CHANNELS = {
     1060539711871004734,
     987737957530239026
 }
 
-RUN_DURATION = 30  # change to 86400 later
+# -----------------------
+# TEAM MAPPING (EDIT THIS)
+# -----------------------
+# RECOMMENDED: use user IDs
+user_team_mapping = {
+    # user_id: "TEAM"
+    111111111111111111: "CS",
+    222222222222222222: "CS",
+    # ...
+}
 
-current_run_id = None
-run_lock = asyncio.Lock()
+# -----------------------
+# RUN STATE
+# -----------------------
+run_active = False
+counts_by_user = defaultdict(int)   # user_id -> count
+user_display_names = {}              # user_id -> display name
+team_counts = defaultdict(int)       # team -> total count
+counts_lock = asyncio.Lock()
 
-# ---------- EVENTS ----------
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print(f"Logged in as {bot.user}")
+# -----------------------
+# HELPER: GET TEAM
+# -----------------------
+def get_user_team(member: discord.Member):
+    return user_team_mapping.get(member.id)
 
+# -----------------------
+# MESSAGE LISTENER
+# -----------------------
 @bot.event
 async def on_message(message: discord.Message):
-    global current_run_id
+    global run_active
 
-    if message.author.bot or not current_run_id:
+    if message.author.bot or message.author.system:
         return
-    if message.channel.id not in TRACKED_CHANNELS:
+
+    if not run_active:
+        return
+
+    if message.channel.id not in TRACK_CHANNELS:
         return
 
     content = (message.content or "").lstrip()
     if not content or not content[0].isdigit():
         return
 
-    async with run_lock:
-        supabase.table("run_user_counts").upsert(
-            {
-                "run_id": current_run_id,
-                "user_id": message.author.id,
-                "count": 1
-            },
-            on_conflict="run_id,user_id"
-        ).execute()
+    async with counts_lock:
+        uid = message.author.id
 
-# ---------- COMMANDS ----------
-@bot.tree.command(name="start_run", description="Starts the 24 hours run in both channels.")
+        counts_by_user[uid] += 1
+        user_display_names[uid] = message.author.display_name
+
+        team = get_user_team(message.author)
+        if team:
+            team_counts[team] += 1
+
+# -----------------------
+# SLASH COMMAND
+# -----------------------
+@bot.tree.command(
+    name="start_run",
+    description="Starts the 24 hours run in both channels."
+)
 async def start_run(interaction: discord.Interaction):
-    global current_run_id
+    global run_active, counts_by_user, team_counts, user_display_names
 
-    active = supabase.table("runs").select("*").eq("active", True).execute().data
-    if active:
-        await interaction.response.send_message("A run is already active.", ephemeral=True)
+    if run_active:
+        await interaction.response.send_message(
+            "A run is already active.",
+            ephemeral=True
+        )
         return
 
-    run = supabase.table("runs").insert(
-        {
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "active": True
-        }
-    ).execute().data[0]
-
-    current_run_id = run["id"]
+    # Reset state
+    run_active = True
+    counts_by_user.clear()
+    team_counts.clear()
+    user_display_names.clear()
 
     await interaction.response.send_message(
         "Run started! Stats are now being collected for the next 24 hours."
     )
 
-    await asyncio.sleep(RUN_DURATION)
+    # TEMPORARY: 30 seconds (change later)
+    await asyncio.sleep(30)
 
-    supabase.table("runs").update(
-        {
-            "active": False,
-            "ended_at": datetime.now(timezone.utc).isoformat()
-        }
-    ).eq("id", current_run_id).execute()
+    # End run
+    async with counts_lock:
+        run_active = False
 
-    # USER LEADERBOARD
-    data = supabase.table("run_user_counts").select("*").eq(
-        "run_id", current_run_id
-    ).execute().data
+        # Sort users by count (descending)
+        user_items = sorted(
+            counts_by_user.items(),
+            key=lambda x: -x[1]
+        )
 
-    data.sort(key=lambda x: -x["count"])
-
-    embed = discord.Embed(title="**USER COUNTS**", color=discord.Color.blue())
-
-    if not data:
-        embed.description = "No numbers were counted."
+    # Build leaderboard text
+    if not user_items:
+        leaderboard_text = "No numbers were counted."
     else:
         lines = []
-        for i, row in enumerate(data, 1):
-            member = interaction.guild.get_member(row["user_id"])
-            name = member.nick if member and member.nick else member.name if member else "Unknown"
-            lines.append(f"#{i} {name}, {row['count']}")
-        embed.description = "\n".join(lines)
+        for i, (uid, count) in enumerate(user_items, start=1):
+            name = user_display_names.get(uid, f"User {uid}")
+            lines.append(f"#{i} {name}, {count}")
+        leaderboard_text = "\n".join(lines)
 
-    await interaction.followup.send("Run ended!", embed=embed)
-    current_run_id = None
+    # Embed
+    embed = discord.Embed(
+        title="**NUMBERS COUNTED**",
+        description=leaderboard_text
+    )
 
+    await interaction.followup.send(
+        "Run ended!",
+        embed=embed
+    )
 
-@bot.tree.command(name="leaderboard_numbers", description="Shows the runs with most numbers counted.")
-async def leaderboard_numbers(interaction: discord.Interaction):
-    runs = supabase.rpc("run_totals").execute().data
+# -----------------------
+# READY EVENT
+# -----------------------
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
-    embed = discord.Embed(title="**NUMBERS COUNTED**", color=discord.Color.gold())
-
-    if not runs:
-        embed.description = "No runs recorded yet."
-    else:
-        lines = []
-        for i, run in enumerate(runs, 1):
-            lines.append(f"**#{i}** Run {run['run_id']}, **{run['total']}**")
-        embed.description = "\n".join(lines)
-
-    await interaction.response.send_message(embed=embed)
-
-# ---------- START ----------
-bot.run(DISCORD_TOKEN, log_handler=handler)
+# -----------------------
+# RUN
+# -----------------------
+bot.run(TOKEN, log_handler=handler)
