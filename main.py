@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 import os
 import asyncio
+import json
 from collections import defaultdict
 
 # -----------------------
@@ -32,7 +33,7 @@ intents.members = True
 # BOT
 # -----------------------
 bot = commands.Bot(
-    command_prefix=None,  # slash-only
+    command_prefix=None,
     intents=intents
 )
 
@@ -45,27 +46,66 @@ TRACK_CHANNELS = {
 }
 
 # -----------------------
-# TEAM MAPPING (EDIT THIS)
+# TEAM MAPPING
 # -----------------------
-# RECOMMENDED: use user IDs
 user_team_mapping = {
     # user_id: "TEAM"
     111111111111111111: "CS",
     222222222222222222: "CS",
-    # ...
 }
 
 # -----------------------
-# RUN STATE
+# STORAGE PATH (Railway Volume)
+# -----------------------
+DATA_DIR = "/data" if os.getenv("RAILWAY_ENVIRONMENT") else "."
+DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
+
+# -----------------------
+# GLOBAL STATE
 # -----------------------
 run_active = False
-counts_by_user = defaultdict(int)   # user_id -> count
-user_display_names = {}              # user_id -> display name
-team_counts = defaultdict(int)       # team -> total count
+
+# Persistent (saved)
+total_counts_by_user = defaultdict(int)   # user_id -> total count
+user_display_names = {}                   # user_id -> display name
+team_counts = defaultdict(int)            # team -> total count
+
+# Run-only (resets every run)
+run_counts_by_user = defaultdict(int)
+
 counts_lock = asyncio.Lock()
 
 # -----------------------
-# HELPER: GET TEAM
+# LOAD / SAVE FUNCTIONS
+# -----------------------
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for uid, count in data.get("total_counts_by_user", {}).items():
+        total_counts_by_user[int(uid)] = count
+
+    user_display_names.update(data.get("user_display_names", {}))
+    team_counts.update(data.get("team_counts", {}))
+
+
+def save_data():
+    data = {
+        "total_counts_by_user": dict(total_counts_by_user),
+        "user_display_names": user_display_names,
+        "team_counts": dict(team_counts),
+    }
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+# -----------------------
+# HELPER
 # -----------------------
 def get_user_team(member: discord.Member):
     return user_team_mapping.get(member.id)
@@ -93,7 +133,11 @@ async def on_message(message: discord.Message):
     async with counts_lock:
         uid = message.author.id
 
-        counts_by_user[uid] += 1
+        # Run-only
+        run_counts_by_user[uid] += 1
+
+        # Persistent totals
+        total_counts_by_user[uid] += 1
         user_display_names[uid] = message.author.display_name
 
         team = get_user_team(message.author)
@@ -105,10 +149,10 @@ async def on_message(message: discord.Message):
 # -----------------------
 @bot.tree.command(
     name="start_run",
-    description="Starts the 24 hours run in both channels."
+    description="Starts a counting run."
 )
 async def start_run(interaction: discord.Interaction):
-    global run_active, counts_by_user, team_counts, user_display_names
+    global run_active
 
     if run_active:
         await interaction.response.send_message(
@@ -117,57 +161,55 @@ async def start_run(interaction: discord.Interaction):
         )
         return
 
-    # Reset state
-    run_active = True
-    counts_by_user.clear()
-    team_counts.clear()
-    user_display_names.clear()
+    async with counts_lock:
+        run_active = True
+        run_counts_by_user.clear()
 
     await interaction.response.send_message(
-        "Run started! Stats are now being collected for the next 24 hours."
+        "Run started! Stats are now being collected."
     )
 
-    # TEMPORARY: 30 seconds (change later)
+    # ⏱ CHANGE THIS TO 24 * 60 * 60 LATER
     await asyncio.sleep(30)
 
-    # End run
     async with counts_lock:
         run_active = False
+        save_data()
 
-        # Sort users by count (descending)
-        user_items = sorted(
-            counts_by_user.items(),
+        leaderboard_items = sorted(
+            total_counts_by_user.items(),
             key=lambda x: -x[1]
         )
 
-    # Build leaderboard text
-    if not user_items:
+    # Build leaderboard
+    if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
     else:
         lines = []
-        for i, (uid, count) in enumerate(user_items, start=1):
+        for i, (uid, count) in enumerate(leaderboard_items, start=1):
             name = user_display_names.get(uid, f"User {uid}")
             lines.append(f"#{i} {name}, {count}")
         leaderboard_text = "\n".join(lines)
 
-    # Embed
     embed = discord.Embed(
-        title="**NUMBERS COUNTED**",
+        title="**GLOBAL LEADERBOARD**",
         description=leaderboard_text
     )
 
     await interaction.followup.send(
-        "Run ended!",
+        "Run ended! Totals have been saved.",
         embed=embed
     )
 
 # -----------------------
-# READY EVENT
+# READY
 # -----------------------
 @bot.event
 async def on_ready():
+    load_data()
     await bot.tree.sync()
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Data file: {DATA_FILE}")
 
 # -----------------------
 # RUN
