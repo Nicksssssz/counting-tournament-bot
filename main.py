@@ -144,7 +144,7 @@ async def start_run(interaction: discord.Interaction):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    embed = discord.Embed(title="**GLOBAL LEADERBOARD**", description=leaderboard_text)
+    embed = discord.Embed(title="**GLOBAL LEADERBOARD**", description=leaderboard_text, color=0xcea958)
 
     await interaction.followup.send("Run ended! Totals saved.", embed=embed)
 
