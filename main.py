@@ -170,7 +170,7 @@ async def start_run(interaction: discord.Interaction):
     )
 
     # ⏱ CHANGE THIS TO 24 * 60 * 60 LATER
-    await asyncio.sleep(20*1)
+    await asyncio.sleep(60*10)
 
     async with counts_lock:
         run_active = False
