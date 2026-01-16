@@ -124,7 +124,7 @@ async def start_run(interaction: discord.Interaction):
     await interaction.response.send_message("Run started! Stats are now being collected.")
 
     # ⏱️ RUN DURATION
-    await asyncio.sleep(3601)
+    await asyncio.sleep(60*45)
 
     async with counts_lock:
         run_active = False
@@ -135,6 +135,8 @@ async def start_run(interaction: discord.Interaction):
             key=lambda x: -x[1]
         )
 
+    await interaction.response.send_message("Message :D !!")
+
     if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
     else:
@@ -143,6 +145,8 @@ async def start_run(interaction: discord.Interaction):
             name = user_usernames.get(uid, f"User {uid}")
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
+
+    await interaction.response.send_message("yippeeeeee")
 
     embed = discord.Embed(title="**USERS LEADERBOARD**", description=leaderboard_text, color=0xcea958)
 
