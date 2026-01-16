@@ -65,18 +65,18 @@ DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
 # -----------------------
 run_active = False
 
-# Persistent (saved)
+# Persistent totals
 total_counts_by_user = defaultdict(int)   # user_id -> total count
-user_display_names = {}                   # user_id -> display name
+user_usernames = {}                       # user_id -> username
 team_counts = defaultdict(int)            # team -> total count
 
-# Run-only (resets every run)
+# Run-only
 run_counts_by_user = defaultdict(int)
 
 counts_lock = asyncio.Lock()
 
 # -----------------------
-# LOAD / SAVE FUNCTIONS
+# LOAD / SAVE
 # -----------------------
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -88,14 +88,16 @@ def load_data():
     for uid, count in data.get("total_counts_by_user", {}).items():
         total_counts_by_user[int(uid)] = count
 
-    user_display_names.update(data.get("user_display_names", {}))
+    user_usernames.update(
+        {int(k): v for k, v in data.get("user_usernames", {}).items()}
+    )
     team_counts.update(data.get("team_counts", {}))
 
 
 def save_data():
     data = {
         "total_counts_by_user": dict(total_counts_by_user),
-        "user_display_names": user_display_names,
+        "user_usernames": user_usernames,
         "team_counts": dict(team_counts),
     }
 
@@ -103,6 +105,16 @@ def save_data():
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+# -----------------------
+# AUTOSAVE LOOP (every 10s)
+# -----------------------
+async def autosave_loop():
+    while True:
+        await asyncio.sleep(10)
+        async with counts_lock:
+            if run_active:
+                save_data()
 
 # -----------------------
 # HELPER
@@ -133,12 +145,11 @@ async def on_message(message: discord.Message):
     async with counts_lock:
         uid = message.author.id
 
-        # Run-only
         run_counts_by_user[uid] += 1
-
-        # Persistent totals
         total_counts_by_user[uid] += 1
-        user_display_names[uid] = message.author.display_name
+
+        # username, not display name
+        user_usernames[uid] = message.author.name
 
         team = get_user_team(message.author)
         if team:
@@ -169,8 +180,8 @@ async def start_run(interaction: discord.Interaction):
         "Run started! Stats are now being collected."
     )
 
-    # ⏱ CHANGE THIS TO 24 * 60 * 60 LATER
-    await asyncio.sleep(60*10)
+    # ⏱ CHANGE TO 24 * 60 * 60 WHEN READY
+    await asyncio.sleep(30)
 
     async with counts_lock:
         run_active = False
@@ -187,7 +198,7 @@ async def start_run(interaction: discord.Interaction):
     else:
         lines = []
         for i, (uid, count) in enumerate(leaderboard_items, start=1):
-            name = user_display_names.get(uid, f"User {uid}")
+            name = user_usernames.get(uid, f"User {uid}")
             lines.append(f"#{i} {name}, {count}")
         leaderboard_text = "\n".join(lines)
 
@@ -197,7 +208,7 @@ async def start_run(interaction: discord.Interaction):
     )
 
     await interaction.followup.send(
-        "Run ended! Totals have been saved.",
+        "Run ended! Totals saved.",
         embed=embed
     )
 
@@ -207,6 +218,7 @@ async def start_run(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     load_data()
+    bot.loop.create_task(autosave_loop())
     await bot.tree.sync()
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"Data file: {DATA_FILE}")
