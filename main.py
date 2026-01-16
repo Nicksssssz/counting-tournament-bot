@@ -97,10 +97,6 @@ async def on_message(message: discord.Message):
     content = (message.content or "").lstrip()
     if not content or not content[0].isdigit():
         return
-    
-    for i in message.content:
-        if not message.content[i].isdigit and message.content[i] == " ":
-            break
 
     async with counts_lock:
         uid = message.author.id
