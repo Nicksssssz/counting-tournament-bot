@@ -37,7 +37,6 @@ user_team_mapping = {
 # -------- LEADERBOARD NICKNAMES (USER ID → DISPLAY NAME) --------
 user_nicknames = {
     749049630775312524: "nicks",
-    # 123456789012345678: "nap",
 }
 
 # -------- STORAGE --------
@@ -90,6 +89,16 @@ def get_user_team(member: discord.Member):
 def get_display_name(uid: int):
     return user_nicknames.get(uid, f"User {uid}")
 
+def is_valid_count_message(content: str) -> bool:
+    content = content.lstrip()
+    if not content:
+        return False
+
+    parts = content.split(" ", 1)
+    number_part = parts[0]
+
+    return number_part.isdigit()
+
 # -------- MESSAGE LISTENER --------
 @bot.event
 async def on_message(message: discord.Message):
@@ -100,8 +109,7 @@ async def on_message(message: discord.Message):
     if not run_active or message.channel.id not in TRACK_CHANNELS:
         return
 
-    content = (message.content or "").lstrip()
-    if not content or not content[0].isdigit():
+    if not is_valid_count_message(message.content or ""):
         return
 
     async with counts_lock:
@@ -117,7 +125,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
-    await asyncio.sleep(45 * 60)
+    await asyncio.sleep(60)
 
     async with counts_lock:
         run_active = False
@@ -138,8 +146,9 @@ async def run_timer(channel: discord.abc.Messageable):
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(
-        title="**GLOBAL LEADERBOARD**",
-        description=leaderboard_text
+        title="**USERS LEADERBOAD**",
+        description=leaderboard_text,
+        color=0xCCA958
     )
 
     await channel.send("Run ended! Totals saved.", embed=embed)
@@ -167,7 +176,11 @@ async def start_run(interaction: discord.Interaction):
     bot.loop.create_task(run_timer(interaction.channel))
 
 
-@bot.tree.command(name="show_data", description="Show stored JSON data")
+@bot.tree.command(
+    name="show_data",
+    description="Show stored JSON data",
+    default_permissions=discord.Permissions.none()
+)
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
         await interaction.response.send_message(
