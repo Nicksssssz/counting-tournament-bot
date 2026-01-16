@@ -129,6 +129,12 @@ async def on_message(message: discord.Message):
     content = (message.content or "").lstrip()
     if not content or not content[0].isdigit():
         return
+    
+    for i in content:
+        if not content[i].isdigit and content[i] != " ":
+            return
+        if not content[i].isdigit and content[i] == " ":
+            break
 
     async with counts_lock:
         uid = message.author.id
@@ -170,7 +176,7 @@ async def start_run(interaction: discord.Interaction):
     )
 
     # ⏱ CHANGE THIS TO 24 * 60 * 60 LATER
-    await asyncio.sleep(60*10)
+    await asyncio.sleep(60*30)
 
     async with counts_lock:
         run_active = False
