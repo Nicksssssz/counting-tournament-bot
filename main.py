@@ -108,23 +108,12 @@ async def on_message(message: discord.Message):
         if team:
             team_counts[team] += 1
 
-# -------- SLASH COMMAND --------
-@bot.tree.command(name="start_run", description="Starts a counting run.")
-async def start_run(interaction: discord.Interaction):
+# -------- RUN TIMER TASK --------
+async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
-    if run_active:
-        await interaction.response.send_message("A run is already active.", ephemeral=True)
-        return
-
-    async with counts_lock:
-        run_active = True
-        run_counts_by_user.clear()
-
-    await interaction.response.send_message("Run started! Stats are now being collected.")
-
-    # ⏱️ RUN DURATION
-    await asyncio.sleep(60*45)
+    # ⏱️ 45 minutes
+    await asyncio.sleep(45 * 60)
 
     async with counts_lock:
         run_active = False
@@ -135,8 +124,6 @@ async def start_run(interaction: discord.Interaction):
             key=lambda x: -x[1]
         )
 
-    await interaction.response.send_message("Message :D !!")
-
     if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
     else:
@@ -146,11 +133,34 @@ async def start_run(interaction: discord.Interaction):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    await interaction.response.send_message("yippeeeeee")
+    embed = discord.Embed(
+        title="**GLOBAL LEADERBOARD**",
+        description=leaderboard_text
+    )
 
-    embed = discord.Embed(title="**USERS LEADERBOARD**", description=leaderboard_text, color=0xcea958)
+    await channel.send("Run ended! Totals saved.", embed=embed)
 
-    await interaction.followup.send("Run ended! Totals saved.", embed=embed)
+# -------- SLASH COMMAND --------
+@bot.tree.command(name="start_run", description="Starts a counting run.")
+async def start_run(interaction: discord.Interaction):
+    global run_active
+
+    if run_active:
+        await interaction.response.send_message(
+            "A run is already active.",
+            ephemeral=True
+        )
+        return
+
+    async with counts_lock:
+        run_active = True
+        run_counts_by_user.clear()
+
+    await interaction.response.send_message(
+        "Run started! Stats are now being collected."
+    )
+
+    bot.loop.create_task(run_timer(interaction.channel))
 
 # -------- READY --------
 @bot.event
