@@ -141,7 +141,7 @@ async def start_run(interaction: discord.Interaction):
         lines = []
         for i, (uid, count) in enumerate(leaderboard_items, start=1):
             name = user_usernames.get(uid, f"User {uid}")
-            lines.append(f"**#{i}** {name} & .napoleon. - CS , **{count:,}** num/min")
+            lines.append(f"**#{i}** {name} & .napoleon. - kailee's, **{count:,}** num/min")
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(title="**GLOBAL LEADERBOARD**", description=leaderboard_text, color=0xcea958)
