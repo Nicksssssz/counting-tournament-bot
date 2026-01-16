@@ -34,6 +34,12 @@ user_team_mapping = {
     222222222222222222: "CS",
 }
 
+# -------- LEADERBOARD NICKNAMES (USER ID → DISPLAY NAME) --------
+user_nicknames = {
+    749049630775312524: "nicks",
+    # 123456789012345678: "nap",
+}
+
 # -------- STORAGE --------
 DATA_DIR = "/data" if os.getenv("RAILWAY_ENVIRONMENT") else "."
 DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
@@ -42,7 +48,6 @@ DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
 run_active = False
 
 total_counts_by_user = defaultdict(int)
-user_usernames = {}
 team_counts = defaultdict(int)
 
 run_counts_by_user = defaultdict(int)
@@ -59,7 +64,6 @@ def load_data():
     for uid, count in data.get("total_counts_by_user", {}).items():
         total_counts_by_user[int(uid)] = count
 
-    user_usernames.update({int(k): v for k, v in data.get("user_usernames", {}).items()})
     team_counts.update(data.get("team_counts", {}))
 
 
@@ -68,7 +72,6 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "total_counts_by_user": dict(total_counts_by_user),
-            "user_usernames": user_usernames,
             "team_counts": dict(team_counts)
         }, f, indent=2)
 
@@ -83,6 +86,9 @@ async def autosave_loop():
 # -------- HELPERS --------
 def get_user_team(member: discord.Member):
     return user_team_mapping.get(member.id)
+
+def get_display_name(uid: int):
+    return user_nicknames.get(uid, f"User {uid}")
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -102,7 +108,6 @@ async def on_message(message: discord.Message):
         uid = message.author.id
         run_counts_by_user[uid] += 1
         total_counts_by_user[uid] += 1
-        user_usernames[uid] = message.author.name
 
         team = get_user_team(message.author)
         if team:
@@ -112,7 +117,6 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
-    # ⏱️ 45 minutes
     await asyncio.sleep(45 * 60)
 
     async with counts_lock:
@@ -129,7 +133,7 @@ async def run_timer(channel: discord.abc.Messageable):
     else:
         lines = []
         for i, (uid, count) in enumerate(leaderboard_items, start=1):
-            name = user_usernames.get(uid, f"User {uid}")
+            name = get_display_name(uid)
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
@@ -140,7 +144,7 @@ async def run_timer(channel: discord.abc.Messageable):
 
     await channel.send("Run ended! Totals saved.", embed=embed)
 
-# -------- SLASH COMMAND --------
+# -------- SLASH COMMANDS --------
 @bot.tree.command(name="start_run", description="Starts a counting run.")
 async def start_run(interaction: discord.Interaction):
     global run_active
@@ -161,6 +165,39 @@ async def start_run(interaction: discord.Interaction):
     )
 
     bot.loop.create_task(run_timer(interaction.channel))
+
+
+@bot.tree.command(name="show_data", description="Show stored JSON data")
+async def show_data(interaction: discord.Interaction):
+    if interaction.user.id != 749049630775312524:
+        await interaction.response.send_message(
+            "You are not allowed to use this command.",
+            ephemeral=True
+        )
+        return
+
+    if not os.path.exists(DATA_FILE):
+        await interaction.response.send_message(
+            "Data file not found.",
+            ephemeral=True
+        )
+        return
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    text = json.dumps(data, indent=2)
+
+    if len(text) > 1900:
+        await interaction.response.send_message(
+            "Data is too large to display.",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"```json\n{text}\n```",
+            ephemeral=True
+        )
 
 # -------- READY --------
 @bot.event
