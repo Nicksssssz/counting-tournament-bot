@@ -95,7 +95,7 @@ async def on_message(message: discord.Message):
         return
 
     content = (message.content or "").lstrip()
-    if not content or not content[0].isdigit() or content[6] != ' ':
+    if not content or not content[0].isdigit():
         return
 
     async with counts_lock:
