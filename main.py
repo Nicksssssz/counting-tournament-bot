@@ -178,8 +178,7 @@ async def start_run(interaction: discord.Interaction):
 
 @bot.tree.command(
     name="show_data",
-    description="Show stored JSON data",
-    default_permissions=discord.Permissions.none()
+    description="Show stored JSON data"
 )
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
