@@ -98,7 +98,7 @@ async def on_message(message: discord.Message):
     if not content or not content[0].isdigit():
         return
     
-    for i in content:
+    for i in message.content:
         if not content[i].isdigit and content[i] != " ":
             return
         if not content[i].isdigit and content[i] == " ":
