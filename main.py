@@ -124,7 +124,7 @@ async def start_run(interaction: discord.Interaction):
     await interaction.response.send_message("Run started! Stats are now being collected.")
 
     # ⏱️ RUN DURATION
-    await asyncio.sleep(3600*8)
+    await asyncio.sleep(20)
 
     async with counts_lock:
         run_active = False
@@ -144,10 +144,7 @@ async def start_run(interaction: discord.Interaction):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    embed = discord.Embed(
-        title="**GLOBAL LEADERBOARD**",
-        description=leaderboard_text
-    )
+    embed = discord.Embed(title="**GLOBAL LEADERBOARD**", description=leaderboard_text)
 
     await interaction.followup.send("Run ended! Totals saved.", embed=embed)
 
