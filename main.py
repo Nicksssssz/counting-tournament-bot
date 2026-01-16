@@ -99,8 +99,6 @@ async def on_message(message: discord.Message):
         return
     
     for i in message.content:
-        if not message.content[i].isdigit and message.content[i] != " ":
-            return
         if not message.content[i].isdigit and message.content[i] == " ":
             break
 
