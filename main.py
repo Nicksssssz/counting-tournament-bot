@@ -124,7 +124,7 @@ async def start_run(interaction: discord.Interaction):
     await interaction.response.send_message("Run started! Stats are now being collected.")
 
     # ⏱️ RUN DURATION
-    await asyncio.sleep(20)
+    await asyncio.sleep(3601)
 
     async with counts_lock:
         run_active = False
