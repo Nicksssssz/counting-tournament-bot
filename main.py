@@ -30,8 +30,10 @@ TRACK_CHANNELS = {
 
 # -------- TEAMS --------
 user_team_mapping = {
-    111111111111111111: "CS",
-    222222222222222222: "CS",
+    749049630775312524: "AA",
+    222222222222222222: "BB",
+    333333333333333333: "CC",
+    444444444444444444: "DD",
 }
 
 # -------- LEADERBOARD NICKNAMES (USER ID → DISPLAY NAME) --------
@@ -83,11 +85,18 @@ async def autosave_loop():
                 save_data()
 
 # -------- HELPERS --------
-def get_user_team(member: discord.Member):
-    return user_team_mapping.get(member.id)
+def get_user_team_by_id(uid: int):
+    return user_team_mapping.get(uid)
 
 def get_display_name(uid: int):
-    return user_nicknames.get(uid, f"User {uid}")
+    if uid in user_nicknames:
+        return user_nicknames[uid]
+
+    user = bot.get_user(uid)
+    if user:
+        return user.name
+
+    return f"User {uid}"
 
 def is_valid_count_message(content: str) -> bool:
     content = content.lstrip()
@@ -117,7 +126,7 @@ async def on_message(message: discord.Message):
         run_counts_by_user[uid] += 1
         total_counts_by_user[uid] += 1
 
-        team = get_user_team(message.author)
+        team = get_user_team_by_id(uid)
         if team:
             team_counts[team] += 1
 
@@ -125,7 +134,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
-    await asyncio.sleep(60 * 60 * 8)
+    await asyncio.sleep(60)
 
     async with counts_lock:
         run_active = False
@@ -176,14 +185,45 @@ async def start_run(interaction: discord.Interaction):
     bot.loop.create_task(run_timer(interaction.channel))
 
 
-@bot.tree.command(
-    name="show_data",
-    description="Show stored JSON data"
-)
+@bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user.")
+async def leaderboard_users(interaction: discord.Interaction):
+    async with counts_lock:
+        leaderboard_items = sorted(
+            total_counts_by_user.items(),
+            key=lambda x: -x[1]
+        )
+
+    if not leaderboard_items:
+        await interaction.response.send_message(
+            "No data available yet.",
+            ephemeral=True
+        )
+        return
+
+    lines = []
+    for i, (uid, count) in enumerate(leaderboard_items, start=1):
+        name = get_display_name(uid)
+        team = get_user_team_by_id(uid)
+
+        if team:
+            lines.append(f"**#{i}** {name} - {team}, **{count:,}**")
+        else:
+            lines.append(f"**#{i}** {name}, **{count:,}**")
+
+    embed = discord.Embed(
+        title="**USERS LEADERBOAD**",
+        description="\n".join(lines),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="show_data", description="Show stored JSON data")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
         await interaction.response.send_message(
-            "You are not allowed to use this command.",
+            "You are not allowed to use this command haha bleehhhhh",
             ephemeral=True
         )
         return
