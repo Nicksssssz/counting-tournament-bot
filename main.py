@@ -125,7 +125,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
-    await asyncio.sleep(60)
+    await asyncio.sleep(60 * 60 * 8)
 
     async with counts_lock:
         run_active = False
