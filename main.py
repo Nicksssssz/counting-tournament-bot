@@ -141,7 +141,7 @@ async def run_timer(channel: discord.abc.Messageable):
         save_data()
 
         leaderboard_items = sorted(
-            total_counts_by_user.items(),
+            run_counts_by_user.items(),
             key=lambda x: -x[1]
         )
 
@@ -230,7 +230,7 @@ async def show_data(interaction: discord.Interaction):
 
     if not os.path.exists(DATA_FILE):
         await interaction.response.send_message(
-            "Data file not found.",
+            "Data file not found... gulp-",
             ephemeral=True
         )
         return
@@ -242,7 +242,7 @@ async def show_data(interaction: discord.Interaction):
 
     if len(text) > 1900:
         await interaction.response.send_message(
-            "Data is too large to display.",
+            "Data is too large to display :p",
             ephemeral=True
         )
     else:
