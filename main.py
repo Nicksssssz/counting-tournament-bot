@@ -154,16 +154,12 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    embed = discord.Embed(
-        title="**USERS LEADERBOAD**",
-        description=leaderboard_text,
-        color=0xCCA958
-    )
+    embed = discord.Embed (title="**USERS LEADERBOAD**", description=leaderboard_text, color=0xCCA958)
 
     await channel.send("Run ended! Totals saved.", embed=embed)
 
 # -------- SLASH COMMANDS --------
-@bot.tree.command(name="start_run", description="Starts a counting run.")
+@bot.tree.command(name="start_run", description="Starts the 24 hours attempt in both channels.")
 async def start_run(interaction: discord.Interaction):
     global run_active
 
@@ -179,7 +175,7 @@ async def start_run(interaction: discord.Interaction):
         run_counts_by_user.clear()
 
     await interaction.response.send_message(
-        "Run started! Stats are now being collected."
+        "Run started! Stats are now being collected for the next 24 hours."
     )
 
     bot.loop.create_task(run_timer(interaction.channel))
