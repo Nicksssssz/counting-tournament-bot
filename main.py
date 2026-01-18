@@ -160,7 +160,7 @@ async def run_timer(channel: discord.abc.Messageable):
 
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="start_run", description="Starts the 24 hours attempt in both channels.")
-async def start_run(interaction: discord.Interaction, channel: discord.abc.Messageable):
+async def start_run(interaction: discord.Interaction):
     global run_active
 
     if run_active:
@@ -168,27 +168,6 @@ async def start_run(interaction: discord.Interaction, channel: discord.abc.Messa
             "A run is already active.",
             ephemeral=True
         )
-
-        async with counts_lock:
-            save_data()
-
-            leaderboard_items = sorted(
-                run_counts_by_user.items(),
-                key=lambda x: -x[1]
-            )
-
-        if not leaderboard_items:
-            leaderboard_text = "No numbers were counted."
-        else:
-            lines = []
-            for i, (uid, count) in enumerate(leaderboard_items, start=1):
-                name = get_display_name(uid)
-                lines.append(f"**#{i}** {name}, **{count:,}**")
-            leaderboard_text = "\n".join(lines)
-
-        embed = discord.Embed (title="**USERS LEADERBOAD**", description=leaderboard_text, color=0xCCA958)
-
-        await channel.send("Run ended! Totals saved.", embed=embed)
         
         return
 
