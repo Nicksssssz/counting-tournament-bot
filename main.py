@@ -248,8 +248,8 @@ async def start_run(interaction: discord.Interaction):
                 title="**CURRENT RUN STATUS**",
                 description=(
                     f"**Time Active:** {format_duration(elapsed)}\n"
-                    f"**Numbers Counted:** {total_in_run:,}\n"
-                    f"**Mistakes:** {mistakes_text}\n\n"
+                    f"✅ **{total_in_run:,}**\n"
+                    f"❌ **{mistakes_text}**\n\n"
                     f"{leaderboard}"
                 ),
                 color=0xCCA958
