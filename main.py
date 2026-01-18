@@ -202,7 +202,7 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title="**FINAL RUN STATS**",
         description=(
-            f"**Accuracy:** {accuracy_text}\n"
+            f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
             f"{leaderboard_text}"
@@ -255,8 +255,8 @@ async def start_run(interaction: discord.Interaction):
             embed = discord.Embed(
                 title="**CURRENT RUN STATUS**",
                 description=(
-                    f"**Time:** {format_duration(elapsed)}\n\n"
-                    f"**{accuracy_text}**\n"
+                    f"Time: **{format_duration(elapsed)}**\n\n"
+                    f"Correct Rate: **{accuracy_text}**\n"
                     f"✅ **{correct:,}**\n"
                     f"❌ **{mistakes_text}**\n\n"
                     f"{leaderboard}"
