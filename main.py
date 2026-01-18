@@ -235,7 +235,7 @@ async def start_run(interaction: discord.Interaction):
 
             if run_team_mistakes:
                 mistakes_text = "\n".join(
-                    f"{team}: {count}"
+                    f"{count}"
                     for team, count in run_team_mistakes.items()
                 )
             else:
