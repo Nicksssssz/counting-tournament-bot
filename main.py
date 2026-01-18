@@ -180,6 +180,7 @@ async def run_timer(channel: discord.abc.Messageable):
         )
 
         mistakes_snapshot = dict(run_team_mistakes)
+        total_in_run = sum(run_counts_by_user.values())
 
     if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
@@ -192,7 +193,7 @@ async def run_timer(channel: discord.abc.Messageable):
 
     if mistakes_snapshot:
         mistakes_text = "\n".join(
-            f"{team}: {count}"
+            f"{count}"
             for team, count in mistakes_snapshot.items()
         )
     else:
@@ -201,13 +202,15 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title="**FINAL RUN STATS**",
         description=(
-            f"**Mistakes:**{mistakes_text}\n"
-            f"{leaderboard_text}\n\n"
+            f"**Numbers Counted:** {total_in_run:,}\n"
+            f"**Mistakes:**\n{mistakes_text}\n\n"
+            f"{leaderboard_text}"
         ),
         color=0xCCA958
     )
 
     await channel.send(embed=embed)
+
 
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="start_run", description="Starts a run or shows current run status.")
