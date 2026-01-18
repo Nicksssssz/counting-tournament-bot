@@ -255,7 +255,7 @@ async def start_run(interaction: discord.Interaction):
             embed = discord.Embed(
                 title="**CURRENT RUN STATUS**",
                 description=(
-                    f"Time: **{format_duration(elapsed)}**\n\n"
+                    f"Time: **{format_duration(elapsed)}**\n"
                     f"Correct Rate: **{accuracy_text}**\n"
                     f"✅ **{correct:,}**\n"
                     f"❌ **{mistakes_text}**\n\n"
