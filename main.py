@@ -180,7 +180,15 @@ async def run_timer(channel: discord.abc.Messageable):
         )
 
         mistakes_snapshot = dict(run_team_mistakes)
-        total_in_run = sum(run_counts_by_user.values())
+        correct = sum(run_counts_by_user.values())
+        incorrect = sum(mistakes_snapshot.values())
+        total_attempts = correct + incorrect
+
+    if total_attempts == 0:
+        accuracy_text = "N/A"
+    else:
+        accuracy = (correct / total_attempts) * 100
+        accuracy_text = "100%" if accuracy == 100 else f"{accuracy:06.3f}%"
 
     if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
@@ -191,19 +199,12 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    if mistakes_snapshot:
-        mistakes_text = "\n".join(
-            f"{count}"
-            for team, count in mistakes_snapshot.items()
-        )
-    else:
-        mistakes_text = "None"
-
     embed = discord.Embed(
         title="**FINAL RUN STATS**",
         description=(
-            f"**Numbers Counted:** {total_in_run:,}\n"
-            f"**Mistakes:**{mistakes_text}\n\n"
+            f"**Accuracy:** {accuracy_text}\n"
+            f"✅ **{correct:,}**\n"
+            f"❌ **{incorrect:,}**\n\n"
             f"{leaderboard_text}"
         ),
         color=0xCCA958
@@ -220,7 +221,16 @@ async def start_run(interaction: discord.Interaction):
     async with counts_lock:
         if run_active:
             elapsed = int(time.time() - run_start_time)
-            total_in_run = sum(run_counts_by_user.values())
+
+            correct = sum(run_counts_by_user.values())
+            incorrect = sum(run_team_mistakes.values())
+            total_attempts = correct + incorrect
+
+            if total_attempts == 0:
+                accuracy_text = "N/A"
+            else:
+                accuracy = (correct / total_attempts) * 100
+                accuracy_text = "100%" if accuracy == 100 else f"{accuracy:06.3f}%"
 
             items = sorted(
                 run_counts_by_user.items(),
@@ -236,20 +246,18 @@ async def start_run(interaction: discord.Interaction):
                 "No numbers counted yet."
             )
 
-            if run_team_mistakes:
-                mistakes_text = "\n".join(
-                    f"{count}"
-                    for team, count in run_team_mistakes.items()
-                )
-            else:
-                mistakes_text = "None"
+            mistakes_text = (
+                f"{incorrect:,}"
+                if incorrect > 0 else
+                "0"
+            )
 
             embed = discord.Embed(
                 title="**CURRENT RUN STATUS**",
                 description=(
                     f"**Time:** {format_duration(elapsed)}\n\n"
-                    f"**99.985%**\n"
-                    f"✅ **{total_in_run:,}**\n"
+                    f"**{accuracy_text}**\n"
+                    f"✅ **{correct:,}**\n"
                     f"❌ **{mistakes_text}**\n\n"
                     f"{leaderboard}"
                 ),
@@ -258,6 +266,7 @@ async def start_run(interaction: discord.Interaction):
 
             await interaction.response.send_message(embed=embed)
             return
+
 
         run_active = True
         run_start_time = time.time()
