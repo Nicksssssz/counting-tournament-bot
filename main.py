@@ -300,6 +300,31 @@ async def leaderboard_users(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+
+@bot.tree.command(name="show_data", description="Shows raw stored data (admin only).")
+async def show_data(interaction: discord.Interaction):
+    if interaction.user.id != 749049630775312524:
+        await interaction.response.send_message(
+            "You are not allowed to use this command.",
+            ephemeral=True
+        )
+        return
+
+    async with counts_lock:
+        data_snapshot = {
+            "total_counts_by_user": dict(total_counts_by_user),
+            "team_counts": dict(team_counts),
+            "team_mistakes": dict(team_mistakes),
+        }
+
+    pretty = json.dumps(data_snapshot, indent=2)
+
+    await interaction.response.send_message(
+        f"```json\n{pretty}\n```",
+        ephemeral=True
+    )
+
+
 # -------- READY --------
 @bot.event
 async def on_ready():
