@@ -48,7 +48,7 @@ user_nicknames = {
 
 # -------- ALTS --------
 alt_to_main = {
-    # ALT_ID: MAIN_ID
+    # ALT_ID: MAIN_ID,
     866803634964529162: 749049630775312524,
 }
 
@@ -276,13 +276,13 @@ async def start_run(interaction: discord.Interaction):
         run_team_mistakes.clear()
 
     await interaction.response.send_message(
-        "Run started! Stats are now being collected."
+        "24 hours attempt started! Stats are now being collected."
     )
 
     bot.loop.create_task(run_timer(interaction.channel))
 
 
-@bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user.")
+@bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
         items = sorted(
@@ -315,11 +315,11 @@ async def leaderboard_users(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="show_data", description="Shows raw stored data (admin only).")
+@bot.tree.command(name="show_data", description="Shows raw stored data).")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
         await interaction.response.send_message(
-            "You are not allowed to use this command.",
+            "You are not allowed to use this command silly :p",
             ephemeral=True
         )
         return
