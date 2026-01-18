@@ -201,7 +201,7 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title="**FINAL RUN STATS**",
         description=(
-            f"**Mistakes:**{mistakes_text}"
+            f"**Mistakes:**{mistakes_text}\n"
             f"{leaderboard_text}\n\n"
         ),
         color=0xCCA958
@@ -246,13 +246,13 @@ async def start_run(interaction: discord.Interaction):
                 description=(
                     f"**Time Active:** {format_duration(elapsed)}\n"
                     f"**Numbers Counted:** {total_in_run:,}\n"
-                    f"**Mistakes:**{mistakes_text}\n\n"
+                    f"**Mistakes:** {mistakes_text}\n\n"
                     f"{leaderboard}"
                 ),
                 color=0xCCA958
             )
 
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed)
             return
 
         run_active = True
