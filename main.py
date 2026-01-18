@@ -30,7 +30,8 @@ TRACK_CHANNELS = {
 }
 
 # -------- CONSTANTS --------
-MISTAKE_BOT_ID = 510016054391734273
+MISTAKE_BOT_CHANNEL_ID = 510016054391734273
+MISTAKE_BOT_RUINED_ID = 639599059036012605
 
 # -------- TEAMS --------
 user_team_mapping = {
@@ -43,6 +44,12 @@ user_team_mapping = {
 # -------- NICKNAMES --------
 user_nicknames = {
     749049630775312524: "nicks",
+}
+
+# -------- ALTS --------
+alt_to_main = {
+    # ALT_ID: MAIN_ID
+    866803634964529162: 749049630775312524,
 }
 
 # -------- STORAGE --------
@@ -96,6 +103,9 @@ async def autosave_loop():
                 save_data()
 
 # -------- HELPERS --------
+def resolve_main_user_id(uid: int) -> int:
+    return alt_to_main.get(uid, uid)
+
 def get_user_team(uid: int):
     return user_team_mapping.get(uid)
 
@@ -124,26 +134,23 @@ def format_duration(seconds: int) -> str:
 async def on_message(message: discord.Message):
     global last_valid_user_id
 
-    # ---- Mistake detection ----
-    if (
-        run_active
-        and message.author.id == MISTAKE_BOT_ID
-        and "channel" in (message.content or "").lower()
-    ):
-        async with counts_lock:
-            if last_valid_user_id is not None:
-                run_counts_by_user[last_valid_user_id] = max(
-                    0, run_counts_by_user[last_valid_user_id] - 1
-                )
-                total_counts_by_user[last_valid_user_id] = max(
-                    0, total_counts_by_user[last_valid_user_id] - 1
-                )
+    # ---- Mistake detection (channel / RUINED bots) ----
+    if run_active and message.author.id in {MISTAKE_BOT_CHANNEL_ID, MISTAKE_BOT_RUINED_ID}:
+        content = (message.content or "").lower()
+        if ("channel" in content and message.author.id == MISTAKE_BOT_CHANNEL_ID) or (
+            "ruined" in content and message.author.id == MISTAKE_BOT_RUINED_ID
+        ):
+            async with counts_lock:
+                if last_valid_user_id is not None:
+                    uid = last_valid_user_id
+                    run_counts_by_user[uid] = max(0, run_counts_by_user[uid] - 1)
+                    total_counts_by_user[uid] = max(0, total_counts_by_user[uid] - 1)
 
-                team = get_user_team(last_valid_user_id)
-                if team:
-                    team_mistakes[team] += 1
-                    run_team_mistakes[team] += 1
-        return
+                    team = get_user_team(uid)
+                    if team:
+                        team_mistakes[team] += 1
+                        run_team_mistakes[team] += 1
+            return
 
     # ---- Normal counting ----
     if message.author.bot or message.author.system:
@@ -154,7 +161,9 @@ async def on_message(message: discord.Message):
         return
 
     async with counts_lock:
-        uid = message.author.id
+        raw_uid = message.author.id
+        uid = resolve_main_user_id(raw_uid)
+
         last_valid_user_id = uid
 
         run_counts_by_user[uid] += 1
@@ -212,7 +221,6 @@ async def run_timer(channel: discord.abc.Messageable):
 
     await channel.send(embed=embed)
 
-
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="start_run", description="Starts a run or shows current run status.")
 async def start_run(interaction: discord.Interaction):
@@ -246,19 +254,13 @@ async def start_run(interaction: discord.Interaction):
                 "No numbers counted yet."
             )
 
-            mistakes_text = (
-                f"{incorrect:,}"
-                if incorrect > 0 else
-                "0"
-            )
-
             embed = discord.Embed(
                 title="**CURRENT RUN STATUS**",
                 description=(
                     f"Time: **{format_duration(elapsed)}**\n"
                     f"Correct Rate: **{accuracy_text}**\n"
                     f"✅ **{correct:,}**\n"
-                    f"❌ **{mistakes_text}**\n\n"
+                    f"❌ **{incorrect:,}**\n\n"
                     f"{leaderboard}"
                 ),
                 color=0xCCA958
@@ -266,7 +268,6 @@ async def start_run(interaction: discord.Interaction):
 
             await interaction.response.send_message(embed=embed)
             return
-
 
         run_active = True
         run_start_time = time.time()
@@ -336,7 +337,6 @@ async def show_data(interaction: discord.Interaction):
         f"```json\n{pretty}\n```",
         ephemeral=True
     )
-
 
 # -------- READY --------
 @bot.event
