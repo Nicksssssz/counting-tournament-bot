@@ -29,6 +29,9 @@ TRACK_CHANNELS = {
     987737957530239026
 }
 
+# -------- CONSTANTS --------
+MISTAKE_BOT_ID = 510016054391734273
+
 # -------- TEAMS --------
 user_team_mapping = {
     749049630775312524: "AA",
@@ -37,7 +40,7 @@ user_team_mapping = {
     444444444444444444: "DD",
 }
 
-# -------- LEADERBOARD NICKNAMES --------
+# -------- NICKNAMES --------
 user_nicknames = {
     749049630775312524: "nicks",
 }
@@ -49,11 +52,15 @@ DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
 # -------- STATE --------
 run_active = False
 run_start_time = None
+last_valid_user_id = None
 
 total_counts_by_user = defaultdict(int)
 team_counts = defaultdict(int)
+team_mistakes = defaultdict(int)
 
 run_counts_by_user = defaultdict(int)
+run_team_mistakes = defaultdict(int)
+
 counts_lock = asyncio.Lock()
 
 # -------- LOAD / SAVE --------
@@ -68,6 +75,7 @@ def load_data():
         total_counts_by_user[int(uid)] = count
 
     team_counts.update(data.get("team_counts", {}))
+    team_mistakes.update(data.get("team_mistakes", {}))
 
 
 def save_data():
@@ -75,7 +83,8 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "total_counts_by_user": dict(total_counts_by_user),
-            "team_counts": dict(team_counts)
+            "team_counts": dict(team_counts),
+            "team_mistakes": dict(team_mistakes),
         }, f, indent=2)
 
 # -------- AUTOSAVE --------
@@ -87,26 +96,22 @@ async def autosave_loop():
                 save_data()
 
 # -------- HELPERS --------
-def get_user_team_by_id(uid: int):
+def get_user_team(uid: int):
     return user_team_mapping.get(uid)
 
 def get_display_name(uid: int):
     if uid in user_nicknames:
         return user_nicknames[uid]
-
     user = bot.get_user(uid)
     if user:
         return user.name
-
     return f"User {uid}"
 
 def is_valid_count_message(content: str) -> bool:
     content = content.lstrip()
     if not content:
         return False
-
-    parts = content.split(" ", 1)
-    return parts[0].isdigit()
+    return content.split(" ", 1)[0].isdigit()
 
 def format_duration(seconds: int) -> str:
     h = seconds // 3600
@@ -117,8 +122,30 @@ def format_duration(seconds: int) -> str:
 # -------- MESSAGE LISTENER --------
 @bot.event
 async def on_message(message: discord.Message):
-    global run_active
+    global last_valid_user_id
 
+    # ---- Mistake detection ----
+    if (
+        run_active
+        and message.author.id == MISTAKE_BOT_ID
+        and "channel" in (message.content or "").lower()
+    ):
+        async with counts_lock:
+            if last_valid_user_id is not None:
+                run_counts_by_user[last_valid_user_id] = max(
+                    0, run_counts_by_user[last_valid_user_id] - 1
+                )
+                total_counts_by_user[last_valid_user_id] = max(
+                    0, total_counts_by_user[last_valid_user_id] - 1
+                )
+
+                team = get_user_team(last_valid_user_id)
+                if team:
+                    team_mistakes[team] += 1
+                    run_team_mistakes[team] += 1
+        return
+
+    # ---- Normal counting ----
     if message.author.bot or message.author.system:
         return
     if not run_active or message.channel.id not in TRACK_CHANNELS:
@@ -128,10 +155,12 @@ async def on_message(message: discord.Message):
 
     async with counts_lock:
         uid = message.author.id
+        last_valid_user_id = uid
+
         run_counts_by_user[uid] += 1
         total_counts_by_user[uid] += 1
 
-        team = get_user_team_by_id(uid)
+        team = get_user_team(uid)
         if team:
             team_counts[team] += 1
 
@@ -150,6 +179,8 @@ async def run_timer(channel: discord.abc.Messageable):
             key=lambda x: -x[1]
         )
 
+        mistakes_snapshot = dict(run_team_mistakes)
+
     if not leaderboard_items:
         leaderboard_text = "No numbers were counted."
     else:
@@ -159,44 +190,64 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
+    if mistakes_snapshot:
+        mistakes_text = "\n".join(
+            f"{team}: {count}"
+            for team, count in mistakes_snapshot.items()
+        )
+    else:
+        mistakes_text = "None"
+
     embed = discord.Embed(
-        title="**USERS LEADERBOAD**",
-        description=leaderboard_text,
+        title="**FINAL RUN STATS**",
+        description=(
+            f"{leaderboard_text}\n\n"
+            f"**Mistakes:**\n{mistakes_text}"
+        ),
         color=0xCCA958
     )
 
-    await channel.send("Run ended! Totals saved.", embed=embed)
+    await channel.send(embed=embed)
 
 # -------- SLASH COMMANDS --------
-@bot.tree.command(name="start_run", description="Starts the 24 hours attempt in both channels.")
+@bot.tree.command(name="start_run", description="Starts a run or shows current run status.")
 async def start_run(interaction: discord.Interaction):
-    global run_active, run_start_time
+    global run_active, run_start_time, last_valid_user_id
 
     async with counts_lock:
         if run_active:
             elapsed = int(time.time() - run_start_time)
             total_in_run = sum(run_counts_by_user.values())
 
-            leaderboard_items = sorted(
+            items = sorted(
                 run_counts_by_user.items(),
                 key=lambda x: -x[1]
             )
 
-            if leaderboard_items:
-                lines = []
-                for i, (uid, count) in enumerate(leaderboard_items, start=1):
-                    name = get_display_name(uid)
-                    lines.append(f"**#{i}** {name}, **{count:,}**")
-                leaderboard_text = "\n".join(lines)
+            leaderboard = (
+                "\n".join(
+                    f"**#{i}** {get_display_name(uid)}, **{count:,}**"
+                    for i, (uid, count) in enumerate(items, start=1)
+                )
+                if items else
+                "No numbers counted yet."
+            )
+
+            if run_team_mistakes:
+                mistakes_text = "\n".join(
+                    f"{team}: {count}"
+                    for team, count in run_team_mistakes.items()
+                )
             else:
-                leaderboard_text = "No numbers counted yet."
+                mistakes_text = "None"
 
             embed = discord.Embed(
-                title="**RUN STATUS**",
+                title="**CURRENT RUN STATUS**",
                 description=(
-                    f"**Time active:** {format_duration(elapsed)}\n"
-                    f"**Numbers counted:** {total_in_run:,}\n\n"
-                    f"{leaderboard_text}"
+                    f"**Time Active:** {format_duration(elapsed)}\n"
+                    f"**Numbers Counted:** {total_in_run:,}\n\n"
+                    f"**Mistakes:**\n{mistakes_text}\n\n"
+                    f"{leaderboard}"
                 ),
                 color=0xCCA958
             )
@@ -206,10 +257,12 @@ async def start_run(interaction: discord.Interaction):
 
         run_active = True
         run_start_time = time.time()
+        last_valid_user_id = None
         run_counts_by_user.clear()
+        run_team_mistakes.clear()
 
     await interaction.response.send_message(
-        "Run started! Stats are now being collected for the next 24 hours."
+        "Run started! Stats are now being collected."
     )
 
     bot.loop.create_task(run_timer(interaction.channel))
@@ -218,12 +271,12 @@ async def start_run(interaction: discord.Interaction):
 @bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
-        leaderboard_items = sorted(
+        items = sorted(
             total_counts_by_user.items(),
             key=lambda x: -x[1]
         )
 
-    if not leaderboard_items:
+    if not items:
         await interaction.response.send_message(
             "No data available yet.",
             ephemeral=True
@@ -231,10 +284,9 @@ async def leaderboard_users(interaction: discord.Interaction):
         return
 
     lines = []
-    for i, (uid, count) in enumerate(leaderboard_items, start=1):
+    for i, (uid, count) in enumerate(items, start=1):
         name = get_display_name(uid)
-        team = get_user_team_by_id(uid)
-
+        team = get_user_team(uid)
         if team:
             lines.append(f"**#{i}** {name} - {team}, **{count:,}**")
         else:
@@ -247,39 +299,6 @@ async def leaderboard_users(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(embed=embed)
-
-
-@bot.tree.command(name="show_data", description="Show stored JSON data")
-async def show_data(interaction: discord.Interaction):
-    if interaction.user.id != 749049630775312524:
-        await interaction.response.send_message(
-            "You are not allowed to use this command haha bleehhhhh",
-            ephemeral=True
-        )
-        return
-
-    if not os.path.exists(DATA_FILE):
-        await interaction.response.send_message(
-            "Data file not found... gulp-",
-            ephemeral=True
-        )
-        return
-
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    text = json.dumps(data, indent=2)
-
-    if len(text) > 1900:
-        await interaction.response.send_message(
-            "Data is too large to display :p",
-            ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            f"```json\n{text}\n```",
-            ephemeral=True
-        )
 
 # -------- READY --------
 @bot.event
