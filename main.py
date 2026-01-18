@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import asyncio
 import json
+import time
 from collections import defaultdict
 
 # -------- ENV --------
@@ -36,7 +37,7 @@ user_team_mapping = {
     444444444444444444: "DD",
 }
 
-# -------- LEADERBOARD NICKNAMES (USER ID → DISPLAY NAME) --------
+# -------- LEADERBOARD NICKNAMES --------
 user_nicknames = {
     749049630775312524: "nicks",
 }
@@ -47,6 +48,7 @@ DATA_FILE = os.path.join(DATA_DIR, "run_data.json")
 
 # -------- STATE --------
 run_active = False
+run_start_time = None
 
 total_counts_by_user = defaultdict(int)
 team_counts = defaultdict(int)
@@ -104,9 +106,13 @@ def is_valid_count_message(content: str) -> bool:
         return False
 
     parts = content.split(" ", 1)
-    number_part = parts[0]
+    return parts[0].isdigit()
 
-    return number_part.isdigit()
+def format_duration(seconds: int) -> str:
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h:02}:{m:02}:{s:02}"
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -117,7 +123,6 @@ async def on_message(message: discord.Message):
         return
     if not run_active or message.channel.id not in TRACK_CHANNELS:
         return
-
     if not is_valid_count_message(message.content or ""):
         return
 
@@ -130,7 +135,7 @@ async def on_message(message: discord.Message):
         if team:
             team_counts[team] += 1
 
-# -------- RUN TIMER TASK --------
+# -------- RUN TIMER --------
 async def run_timer(channel: discord.abc.Messageable):
     global run_active
 
@@ -154,25 +159,53 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    embed = discord.Embed (title="**USERS LEADERBOAD**", description=leaderboard_text, color=0xCCA958)
+    embed = discord.Embed(
+        title="**USERS LEADERBOAD**",
+        description=leaderboard_text,
+        color=0xCCA958
+    )
 
     await channel.send("Run ended! Totals saved.", embed=embed)
 
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="start_run", description="Starts the 24 hours attempt in both channels.")
 async def start_run(interaction: discord.Interaction):
-    global run_active
-
-    if run_active:
-        await interaction.response.send_message(
-            "A run is already active.",
-            ephemeral=True
-        )
-        
-        return
+    global run_active, run_start_time
 
     async with counts_lock:
+        if run_active:
+            elapsed = int(time.time() - run_start_time)
+            total_in_run = sum(run_counts_by_user.values())
+
+            leaderboard_items = sorted(
+                run_counts_by_user.items(),
+                key=lambda x: -x[1]
+            )
+
+            if leaderboard_items:
+                lines = []
+                for i, (uid, count) in enumerate(leaderboard_items, start=1):
+                    name = get_display_name(uid)
+                    lines.append(f"**#{i}** {name}, **{count:,}**")
+                leaderboard_text = "\n".join(lines)
+            else:
+                leaderboard_text = "No numbers counted yet."
+
+            embed = discord.Embed(
+                title="**RUN STATUS**",
+                description=(
+                    f"**Time active:** {format_duration(elapsed)}\n"
+                    f"**Numbers counted:** {total_in_run:,}\n\n"
+                    f"{leaderboard_text}"
+                ),
+                color=0xCCA958
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         run_active = True
+        run_start_time = time.time()
         run_counts_by_user.clear()
 
     await interaction.response.send_message(
