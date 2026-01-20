@@ -209,7 +209,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(60)
+    await asyncio.sleep(30)
 
     async with counts_lock:
         run_active = False
@@ -265,6 +265,8 @@ async def run_timer(channel: discord.abc.Messageable):
     )
 
     await channel.send(embed=embed)
+
+    await embed.pin()
 
     # clear run-only state
     run_counts_by_user.clear()
