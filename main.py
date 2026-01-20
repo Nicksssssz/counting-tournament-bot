@@ -212,7 +212,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(30*60)
+    await asyncio.sleep(10)
 
     async with counts_lock:
         run_active = False
@@ -257,7 +257,7 @@ async def run_timer(channel: discord.abc.Messageable):
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(
-        title=f"**FINAL *{current_run_team.upper()}* RUN STATS**",
+        title=f"**FINAL RUN STATS: {current_run_team.upper()}**",
         description=(
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
