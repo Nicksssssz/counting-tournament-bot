@@ -400,6 +400,35 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="leaderboard_numbers", description="Shows numbers counted per team attempt (per-run).")
+async def leaderboard_numbers(interaction: discord.Interaction):
+    # collect (team, attempt_index, correct_count)
+    entries = []
+    async with counts_lock:
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                count = int(run.get("correct", 0))
+                entries.append((team, idx, count))
+
+    if not entries:
+        await interaction.response.send_message("No run data available yet.")
+        return
+
+    # sort descending by count
+    entries.sort(key=lambda x: -x[2])
+
+    lines = []
+    for rank, (team, attempt, count) in enumerate(entries, start=1):
+        lines.append(f"**#{rank}** {team} ({attempt}) - **{count:,}**")
+
+    embed = discord.Embed(
+        title="**NUMBERS LEADERBOARD**",
+        description="\n".join(lines),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="show_data", description="Shows raw stored data).")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
