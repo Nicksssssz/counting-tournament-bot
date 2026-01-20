@@ -264,9 +264,9 @@ async def run_timer(channel: discord.abc.Messageable):
         color=0xCCA958
     )
 
-    await channel.send(embed=embed)
+    message = await channel.send(embed=embed)
 
-    await embed.pin()
+    await message.pin()
 
     # clear run-only state
     run_counts_by_user.clear()
