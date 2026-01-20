@@ -25,9 +25,10 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 
 # -------- CHANNELS --------
 TRACK_CHANNELS = {
-    1060539711871004734,
-    987737957530239026,
-    1052340912216358993
+    1060539711871004734, #commands
+    987737957530239026,  # dms
+    1052340912216358993, # juiz
+    1343071180327751720  # eba
 }
 
 # -------- CONSTANTS --------
@@ -165,7 +166,7 @@ async def on_message(message: discord.Message):
     # ---- Mistake detection (channel / RUINED bots) ----
     if run_active and message.author.id in {MISTAKE_BOT_CHANNEL_ID, MISTAKE_BOT_RUINED_ID}:
         content = (message.content or "").lower()
-        if ("channel" in content and message.author.id == MISTAKE_BOT_CHANNEL_ID) or (
+        if ("of" in content and message.author.id == MISTAKE_BOT_CHANNEL_ID) or (
             "ruined" in content and message.author.id == MISTAKE_BOT_RUINED_ID
         ):
             async with counts_lock:
