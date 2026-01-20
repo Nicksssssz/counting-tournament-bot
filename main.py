@@ -257,7 +257,7 @@ async def run_timer(channel: discord.abc.Messageable):
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(
-        title="**FINAL RUN STATS**",
+        title=f"**FINAL{current_run_team.upper()} RUN STATS**",
         description=(
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
