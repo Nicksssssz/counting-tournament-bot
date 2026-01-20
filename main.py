@@ -37,9 +37,9 @@ MISTAKE_BOT_RUINED_ID = 639599059036012605
 
 # -------- TEAMS --------
 user_team_mapping = {
-    749049630775312524: "eba",
+    749049630775312524: "ebas",
     497517322206969856: "eba",
-    222222222222222222: "BB",
+    709650885487099985: "ebas",
     333333333333333333: "CC",
     444444444444444444: "DD"
 }
@@ -212,7 +212,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(30)
+    await asyncio.sleep(30*60)
 
     async with counts_lock:
         run_active = False
@@ -257,7 +257,7 @@ async def run_timer(channel: discord.abc.Messageable):
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(
-        title=f"**FINAL{current_run_team.upper()} RUN STATS**",
+        title=f"**FINAL *{current_run_team.upper()}* RUN STATS**",
         description=(
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
