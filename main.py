@@ -37,9 +37,9 @@ MISTAKE_BOT_RUINED_ID = 639599059036012605
 
 # -------- TEAMS --------
 user_team_mapping = {
-    749049630775312524: "ebas",
+    749049630775312524: "eba",
     497517322206969856: "eba",
-    709650885487099985: "ebas",
+    709650885487099985: "eba",
     333333333333333333: "CC",
     444444444444444444: "DD"
 }
@@ -369,7 +369,7 @@ async def leaderboard_users(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="leaderboard_accuracy", description="Shows accuracy leaderboard by team attempts.")
+@bot.tree.command(name="leaderboard_accuracy", description="Shows accuracy leaderboard for all team attempts.")
 async def leaderboard_accuracy(interaction: discord.Interaction):
     # collect (team, attempt_index, accuracy_value)
     entries = []
@@ -405,7 +405,7 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="leaderboard_numbers", description="Shows numbers counted per team attempt (per-run).")
+@bot.tree.command(name="leaderboard_numbers", description="Shows numbers counted per team attempt.")
 async def leaderboard_numbers(interaction: discord.Interaction):
     # collect (team, attempt_index, correct_count)
     entries = []
