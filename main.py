@@ -176,7 +176,7 @@ async def minute_sampler():
     # then sample up to RUN_ANALYSIS_WINDOW_MINUTES times
     for _ in range(RUN_ANALYSIS_WINDOW_MINUTES):
         # wait one minute
-        await asyncio.sleep(60)
+        await asyncio.sleep(10)
         async with counts_lock:
             if not run_active:
                 break
