@@ -75,8 +75,12 @@ team_mistakes = defaultdict(int)
 run_counts_by_user = defaultdict(int)
 run_team_mistakes = defaultdict(int)
 
-# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None }
+# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1min": int }
 team_accuracy_history = defaultdict(list)
+
+# For fastest 1-minute sliding window analysis
+RUN_ANALYSIS_WINDOW_MINUTES = 10
+run_minute_snapshots = []  # cumulative totals sampled each minute during run
 
 counts_lock = asyncio.Lock()
 
@@ -160,6 +164,24 @@ def format_accuracy_display(acc_value):
         return "100%"
     return f"{acc_value:06.3f}%"
 
+# -------- MINUTE SAMPLER TASK --------
+async def minute_sampler():
+    """
+    Samples cumulative run counts once immediately at start, then once per minute up to RUN_ANALYSIS_WINDOW_MINUTES.
+    Stops early if run ends.
+    """
+    # take initial snapshot
+    async with counts_lock:
+        run_minute_snapshots.append(sum(run_counts_by_user.values()))
+    # then sample up to RUN_ANALYSIS_WINDOW_MINUTES times
+    for _ in range(RUN_ANALYSIS_WINDOW_MINUTES):
+        # wait one minute
+        await asyncio.sleep(60)
+        async with counts_lock:
+            if not run_active:
+                break
+            run_minute_snapshots.append(sum(run_counts_by_user.values()))
+
 # -------- MESSAGE LISTENER --------
 @bot.event
 async def on_message(message: discord.Message):
@@ -212,7 +234,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(10*60)
+    await asyncio.sleep(30*60)
 
     async with counts_lock:
         run_active = False
@@ -229,13 +251,29 @@ async def run_timer(channel: discord.abc.Messageable):
 
         # compute numeric accuracy value (percent) and store per-team attempt
         acc_value = format_accuracy_value(correct, incorrect)
+
+        # compute best 1-minute delta using run_minute_snapshots
+        best_1min = 0
+        # need at least two snapshots to compute deltas
+        if len(run_minute_snapshots) >= 2:
+            # compute deltas between consecutive snapshots
+            deltas = []
+            # only consider up to RUN_ANALYSIS_WINDOW_MINUTES intervals (len-1 snapshots)
+            max_intervals = min(len(run_minute_snapshots) - 1, RUN_ANALYSIS_WINDOW_MINUTES)
+            for i in range(max_intervals):
+                delta = run_minute_snapshots[i + 1] - run_minute_snapshots[i]
+                deltas.append(delta)
+            if deltas:
+                best_1min = max(deltas)
+
         if current_run_team:
             # append attempt record for that team
             team_accuracy_history[current_run_team].append({
                 "correct": correct,
                 "incorrect": incorrect,
                 # store numeric value or None
-                "accuracy": acc_value
+                "accuracy": acc_value,
+                "best_1min": best_1min
             })
 
         # persist data
@@ -257,12 +295,13 @@ async def run_timer(channel: discord.abc.Messageable):
         leaderboard_text = "\n".join(lines)
 
     embed = discord.Embed(
-        title=f"**FINAL RUN STATS: {current_run_team.upper()}**",
+        title=f"**FINAL RUN STATS: {current_run_team.upper() if current_run_team else 'NO TEAM'}**",
         description=(
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
-            f"{leaderboard_text}"
+            f"{leaderboard_text}\n\n"
+            f"**Best 1-minute (during first {RUN_ANALYSIS_WINDOW_MINUTES} minutes):** {best_1min:,}"
         ),
         color=0xCCA958
     )
@@ -274,6 +313,7 @@ async def run_timer(channel: discord.abc.Messageable):
     # clear run-only state
     run_counts_by_user.clear()
     run_team_mistakes.clear()
+    run_minute_snapshots.clear()
     current_run_team = None
 
 # -------- SLASH COMMANDS --------
@@ -330,12 +370,15 @@ async def start_run(interaction: discord.Interaction):
         current_run_team = None
         run_counts_by_user.clear()
         run_team_mistakes.clear()
+        run_minute_snapshots.clear()
 
     await interaction.response.send_message(
         "24 hours attempt started! Stats are now being collected."
     )
 
+    # start run timer and minute sampler
     bot.loop.create_task(run_timer(interaction.channel))
+    bot.loop.create_task(minute_sampler())
 
 @bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
@@ -464,7 +507,7 @@ async def on_ready():
     load_data()
     bot.loop.create_task(autosave_loop())
     await bot.tree.sync()
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Logged in as {bot.user} (ID: {bot.user.id}")
     print(f"Data file: {DATA_FILE}")
 
 # -------- RUN --------
