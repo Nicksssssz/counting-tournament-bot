@@ -78,9 +78,11 @@ run_team_mistakes = defaultdict(int)
 # store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1min": int }
 team_accuracy_history = defaultdict(list)
 
-# For fastest 1-minute sliding window analysis
-RUN_ANALYSIS_WINDOW_MINUTES = 10
-run_minute_snapshots = []  # cumulative totals sampled each minute during run
+# For fastest 1-hour sliding window analysis
+RUN_ANALYSIS_WINDOW_HOURS = 24   # total run duration
+FASTEST_WINDOW_SECONDS = 3600   # 1 hour window
+SAMPLE_INTERVAL_SECONDS = 10    # keep this
+run_minute_snapshots = []  # cumulative totals sampled during run (every SAMPLE_INTERVAL_SECONDS seconds)
 
 counts_lock = asyncio.Lock()
 
@@ -164,19 +166,18 @@ def format_accuracy_display(acc_value):
         return "100%"
     return f"{acc_value:06.3f}%"
 
-# -------- MINUTE SAMPLER TASK --------
+# -------- SECONDARY SAMPLER TASK (every SAMPLE_INTERVAL_SECONDS) --------
 async def minute_sampler():
     """
-    Samples cumulative run counts once immediately at start, then once per minute up to RUN_ANALYSIS_WINDOW_MINUTES.
-    Stops early if run ends.
+    Samples cumulative run counts once immediately at start, then every SAMPLE_INTERVAL_SECONDS seconds
+    up to RUN_ANALYSIS_WINDOW_MINUTES minutes (or until the run ends).
     """
-    # take initial snapshot
+    total_samples = (RUN_ANALYSIS_WINDOW_HOURS * 3600) // SAMPLE_INTERVAL_SECONDS
+    # initial snapshot at time 0
     async with counts_lock:
         run_minute_snapshots.append(sum(run_counts_by_user.values()))
-    # then sample up to RUN_ANALYSIS_WINDOW_MINUTES times
-    for _ in range(RUN_ANALYSIS_WINDOW_MINUTES):
-        # wait one minute
-        await asyncio.sleep(10)
+    for _ in range(total_samples):
+        await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         async with counts_lock:
             if not run_active:
                 break
@@ -234,7 +235,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(5*60)
+    await asyncio.sleep(30*60)
 
     async with counts_lock:
         run_active = False
@@ -252,19 +253,19 @@ async def run_timer(channel: discord.abc.Messageable):
         # compute numeric accuracy value (percent) and store per-team attempt
         acc_value = format_accuracy_value(correct, incorrect)
 
-        # compute best 1-minute delta using run_minute_snapshots
-        best_1min = 0
-        # need at least two snapshots to compute deltas
-        if len(run_minute_snapshots) >= 2:
-            # compute deltas between consecutive snapshots
+        # compute best 1-minute (60s) sliding-window delta using run_minute_snapshots
+        best_1hour = 0
+        window_samples = FASTEST_WINDOW_SECONDS // SAMPLE_INTERVAL_SECONDS
+        # need at least window_samples+1 snapshots to compute deltas (start and end)
+        if len(run_minute_snapshots) > window_samples:
             deltas = []
-            # only consider up to RUN_ANALYSIS_WINDOW_MINUTES intervals (len-1 snapshots)
-            max_intervals = min(len(run_minute_snapshots) - 1, RUN_ANALYSIS_WINDOW_MINUTES)
-            for i in range(max_intervals):
-                delta = run_minute_snapshots[i + 1] - run_minute_snapshots[i]
+            N = len(run_minute_snapshots)
+            # for each starting index i where i+window_samples < N
+            for i in range(0, N - window_samples):
+                delta = run_minute_snapshots[i + window_samples] - run_minute_snapshots[i]
                 deltas.append(delta)
             if deltas:
-                best_1min = max(deltas)
+                best_1hour = max(deltas)
 
         if current_run_team:
             # append attempt record for that team
@@ -273,7 +274,7 @@ async def run_timer(channel: discord.abc.Messageable):
                 "incorrect": incorrect,
                 # store numeric value or None
                 "accuracy": acc_value,
-                "best_1min": best_1min
+                "best_1hour": best_1hour
             })
 
         # persist data
@@ -301,7 +302,7 @@ async def run_timer(channel: discord.abc.Messageable):
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
             f"{leaderboard_text}\n\n"
-            f"**Best 1-minute (during first {RUN_ANALYSIS_WINDOW_MINUTES} minutes):** {best_1min:,}"
+            f"**Best 1-hour period:** **{best_1hour:,}**"
         ),
         color=0xCCA958
     )
