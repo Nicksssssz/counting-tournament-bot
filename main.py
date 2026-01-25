@@ -76,14 +76,18 @@ team_mistakes = defaultdict(int)
 run_counts_by_user = defaultdict(int)
 run_team_mistakes = defaultdict(int)
 
-# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1min": int }
+# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1hour": int, "best_1hour_start": int }
 team_accuracy_history = defaultdict(list)
 
 # For fastest 1-hour sliding window analysis
-RUN_ANALYSIS_WINDOW_HOURS = 24   # total run duration
+RUN_ANALYSIS_WINDOW_HOURS = 24   # total run duration (used for number of samples)
 FASTEST_WINDOW_SECONDS = 3600   # 1 hour window
-SAMPLE_INTERVAL_SECONDS = 10    # keep this
-run_minute_snapshots = []  # cumulative totals sampled during run (every SAMPLE_INTERVAL_SECONDS seconds)
+SAMPLE_INTERVAL_SECONDS = 10    # keep this (sampling resolution)
+# per-channel snapshots (cumulative totals sampled during run every SAMPLE_INTERVAL_SECONDS)
+run_snapshots_per_channel = defaultdict(list)
+
+# per-channel running counters during run
+run_counts_by_channel = defaultdict(int)
 
 counts_lock = asyncio.Lock()
 
@@ -171,18 +175,21 @@ def format_accuracy_display(acc_value):
 async def minute_sampler():
     """
     Samples cumulative run counts once immediately at start, then every SAMPLE_INTERVAL_SECONDS seconds
-    up to RUN_ANALYSIS_WINDOW_MINUTES minutes (or until the run ends).
+    up to RUN_ANALYSIS_WINDOW_HOURS hours (or until the run ends).
+    Stores per-channel cumulative snapshots into run_snapshots_per_channel.
     """
     total_samples = (RUN_ANALYSIS_WINDOW_HOURS * 3600) // SAMPLE_INTERVAL_SECONDS
-    # initial snapshot at time 0
+    # initial snapshot at time 0 for each tracked channel
     async with counts_lock:
-        run_minute_snapshots.append(sum(run_counts_by_user.values()))
+        for ch in TRACK_CHANNELS:
+            run_snapshots_per_channel[ch].append(run_counts_by_channel.get(ch, 0))
     for _ in range(total_samples):
         await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         async with counts_lock:
             if not run_active:
                 break
-            run_minute_snapshots.append(sum(run_counts_by_user.values()))
+            for ch in TRACK_CHANNELS:
+                run_snapshots_per_channel[ch].append(run_counts_by_channel.get(ch, 0))
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -228,6 +235,9 @@ async def on_message(message: discord.Message):
         run_counts_by_user[uid] += 1
         total_counts_by_user[uid] += 1
 
+        # increment per-channel running counter
+        run_counts_by_channel[message.channel.id] += 1
+
         team = get_user_team(uid)
         if team:
             team_counts[team] += 1
@@ -236,7 +246,8 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(60*60*23)
+    # keep existing sleep as in your file (you changed it before)
+    await asyncio.sleep(60*60+5)
 
     async with counts_lock:
         run_active = False
@@ -254,19 +265,26 @@ async def run_timer(channel: discord.abc.Messageable):
         # compute numeric accuracy value (percent) and store per-team attempt
         acc_value = format_accuracy_value(correct, incorrect)
 
-        # compute best 1-minute (60s) sliding-window delta using run_minute_snapshots
+        # compute best 1-hour sliding-window delta per channel using run_snapshots_per_channel
         best_1hour = 0
+        best_channel = None
+        best_start_index = 0
         window_samples = FASTEST_WINDOW_SECONDS // SAMPLE_INTERVAL_SECONDS
-        # need at least window_samples+1 snapshots to compute deltas (start and end)
-        if len(run_minute_snapshots) > window_samples:
-            deltas = []
-            N = len(run_minute_snapshots)
-            # for each starting index i where i+window_samples < N
+        # iterate channels and compute deltas
+        for ch, snapshots in run_snapshots_per_channel.items():
+            N = len(snapshots)
+            if N <= window_samples:
+                continue
+            # scan all possible windows
             for i in range(0, N - window_samples):
-                delta = run_minute_snapshots[i + window_samples] - run_minute_snapshots[i]
-                deltas.append(delta)
-            if deltas:
-                best_1hour = max(deltas)
+                delta = snapshots[i + window_samples] - snapshots[i]
+                if delta > best_1hour:
+                    best_1hour = delta
+                    best_channel = ch
+                    best_start_index = i
+
+        # compute start seconds relative to run (multiple of SAMPLE_INTERVAL_SECONDS)
+        best_start_seconds = best_start_index * SAMPLE_INTERVAL_SECONDS if best_channel is not None else 0
 
         if current_run_team:
             # append attempt record for that team
@@ -275,7 +293,8 @@ async def run_timer(channel: discord.abc.Messageable):
                 "incorrect": incorrect,
                 # store numeric value or None
                 "accuracy": acc_value,
-                "best_1hour": best_1hour
+                "best_1hour": best_1hour,
+                "best_1hour_start": best_start_seconds
             })
 
         # persist data
@@ -296,6 +315,16 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
+    # get channel display name if possible
+    if best_channel is not None:
+        ch_obj = bot.get_channel(best_channel)
+        ch_name = f" ({ch_obj.name})" if ch_obj else ""
+        best_channel_text = f"channel {best_channel}{ch_name}"
+        best_start_text = format_duration(best_start_seconds)
+    else:
+        best_channel_text = "N/A"
+        best_start_text = "00:00:00"
+
     embed = discord.Embed(
         title=f"**FINAL RUN STATS: {current_run_team.upper() if current_run_team else 'NO TEAM'}**",
         description=(
@@ -303,7 +332,8 @@ async def run_timer(channel: discord.abc.Messageable):
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
             f"{leaderboard_text}\n\n"
-            f"**Best 1-hour period:** **{best_1hour:,}**"
+            f"**Best 1-hour period:** **{best_1hour:,}** (in {best_channel_text})\n"
+            f"**Started at (run time):** {best_start_text}"
         ),
         color=0xCCA958
     )
@@ -315,12 +345,13 @@ async def run_timer(channel: discord.abc.Messageable):
     # clear run-only state
     run_counts_by_user.clear()
     run_team_mistakes.clear()
-    run_minute_snapshots.clear()
+    run_snapshots_per_channel.clear()
+    run_counts_by_channel.clear()
     current_run_team = None
 
 # -------- SLASH COMMANDS --------
-@bot.tree.command(name="start_run", description="Starts a run or shows current run status.")
-async def start_run(interaction: discord.Interaction):
+@bot.tree.command(name="run", description="Starts a run or shows current run status.")
+async def run(interaction: discord.Interaction):
     global run_active, run_start_time, last_valid_user_id, current_run_team
 
     async with counts_lock:
@@ -337,10 +368,7 @@ async def start_run(interaction: discord.Interaction):
                 acc_val = format_accuracy_value(correct, incorrect)
                 accuracy_text = "100%" if acc_val == 100 else (format_accuracy_display(acc_val) if acc_val is not None else "N/A")
 
-            items = sorted(
-                run_counts_by_user.items(),
-                key=lambda x: -x[1]
-            )
+            items = sorted(run_counts_by_user.items(),key=lambda x: -x[1])
 
             leaderboard = (
                 "\n".join(
@@ -372,11 +400,10 @@ async def start_run(interaction: discord.Interaction):
         current_run_team = None
         run_counts_by_user.clear()
         run_team_mistakes.clear()
-        run_minute_snapshots.clear()
+        run_snapshots_per_channel.clear()
+        run_counts_by_channel.clear()
 
-    await interaction.response.send_message(
-        "24 hours attempt started! Stats are now being collected."
-    )
+    await interaction.response.send_message("24 hours attempt started! Stats are now being collected.")
 
     # start run timer and minute sampler
     bot.loop.create_task(run_timer(interaction.channel))
@@ -385,16 +412,10 @@ async def start_run(interaction: discord.Interaction):
 @bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
-        items = sorted(
-            total_counts_by_user.items(),
-            key=lambda x: -x[1]
-        )
+        items = sorted(total_counts_by_user.items(), key=lambda x: -x[1])
 
     if not items:
-        await interaction.response.send_message(
-            "No data available yet.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("No data available yet.", ephemeral=True)
         return
 
     lines = []
@@ -424,7 +445,6 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
                 acc = run.get("accuracy")
                 if acc is None:
                     continue
-                # acc is numeric percent
                 entries.append((team, idx, float(acc)))
 
     if not entries:
@@ -482,10 +502,7 @@ async def leaderboard_numbers(interaction: discord.Interaction):
 @bot.tree.command(name="show_data", description="Shows raw stored data).")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
-        await interaction.response.send_message(
-            "You are not allowed to use this command silly :p",
-            ephemeral=True
-        )
+        await interaction.response.send_message("You are not allowed to use this command silly :p", ephemeral=True)
         return
 
     async with counts_lock:
@@ -496,12 +513,9 @@ async def show_data(interaction: discord.Interaction):
             "team_accuracy_history": dict(team_accuracy_history),
         }
 
-    pretty = json.dumps(data_snapshot, indent=2)
+    data_message = json.dumps(data_snapshot, indent=2)
 
-    await interaction.response.send_message(
-        f"```json\n{pretty}\n```",
-        ephemeral=True
-    )
+    await interaction.response.send_message(f"```json\n{data_message}\n```", ephemeral=True)
 
 # -------- READY --------
 @bot.event
