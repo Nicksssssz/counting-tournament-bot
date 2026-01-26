@@ -70,8 +70,6 @@ last_valid_user_id = None
 current_run_team = None  # <-- team assigned to the current run (set on first valid number)
 
 total_counts_by_user = defaultdict(int)
-team_counts = defaultdict(int)
-team_mistakes = defaultdict(int)
 
 run_counts_by_user = defaultdict(int)
 run_team_mistakes = defaultdict(int)
@@ -102,12 +100,8 @@ def load_data():
     for uid, count in data.get("total_counts_by_user", {}).items():
         total_counts_by_user[int(uid)] = count
 
-    team_counts.update(data.get("team_counts", {}))
-    team_mistakes.update(data.get("team_mistakes", {}))
-
     # load accuracy history (keys are team names)
     for team, runs in data.get("team_accuracy_history", {}).items():
-        # runs should be list of dicts; keep as-is
         team_accuracy_history[team] = runs
 
 
@@ -116,8 +110,6 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "total_counts_by_user": dict(total_counts_by_user),
-            "team_counts": dict(team_counts),
-            "team_mistakes": dict(team_mistakes),
             "team_accuracy_history": dict(team_accuracy_history),
         }, f, indent=2)
 
@@ -210,7 +202,6 @@ async def on_message(message: discord.Message):
 
                     team = get_user_team(uid)
                     if team:
-                        team_mistakes[team] += 1
                         run_team_mistakes[team] += 1
             return
 
@@ -238,15 +229,11 @@ async def on_message(message: discord.Message):
         # increment per-channel running counter
         run_counts_by_channel[message.channel.id] += 1
 
-        team = get_user_team(uid)
-        if team:
-            team_counts[team] += 1
-
 # -------- RUN TIMER --------
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    # keep existing sleep as in your file (you changed it before)
+    # keep existing sleep as in your file
     await asyncio.sleep(60*60+5)
 
     async with counts_lock:
@@ -339,12 +326,12 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title=f"**FINAL RUN STATS: {current_run_team.upper() if current_run_team else 'NO TEAM'}**",
         description=(
+            f"Best 1-hour run: **{best_1hour:,}** (in {best_channel_text})\n"
+            f"Started at (run time): **{best_start_text}**\n\n"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
-            f"{leaderboard_text}\n\n"
-            f"**Best 1-hour period:** **{best_1hour:,}** (in {best_channel_text})\n"
-            f"**Started at (run time):** {best_start_text}"
+            f"{leaderboard_text}"
         ),
         color=0xCCA958
     )
@@ -362,7 +349,7 @@ async def run_timer(channel: discord.abc.Messageable):
 
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="run", description="Starts a run or shows current run status.")
-async def run(interaction: discord.Interaction):
+async def start_run(interaction: discord.Interaction):
     global run_active, run_start_time, last_valid_user_id, current_run_team
 
     async with counts_lock:
@@ -552,7 +539,7 @@ async def leaderboard_fastest(interaction: discord.Interaction):
             lines.append(f"**#{rank}** {team} , **{best:,}**")
 
     embed = discord.Embed(
-        title="**FASTEST HOUR LEADERBOARD**",
+        title="**FASTEST RUN LEADERBOARD**",
         description="\n".join(lines),
         color=0xCCA958
     )
@@ -571,8 +558,6 @@ async def show_data(interaction: discord.Interaction):
     async with counts_lock:
         data_snapshot = {
             "total_counts_by_user": dict(total_counts_by_user),
-            "team_counts": dict(team_counts),
-            "team_mistakes": dict(team_mistakes),
             "team_accuracy_history": dict(team_accuracy_history),
         }
 
