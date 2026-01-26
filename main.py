@@ -76,7 +76,7 @@ team_mistakes = defaultdict(int)
 run_counts_by_user = defaultdict(int)
 run_team_mistakes = defaultdict(int)
 
-# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1hour": int, "best_1hour_start": int }
+# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1hour": int, "best_1hour_start": int, "top_users": [str,...] }
 team_accuracy_history = defaultdict(list)
 
 # For fastest 1-hour sliding window analysis
@@ -286,6 +286,16 @@ async def run_timer(channel: discord.abc.Messageable):
         # compute start seconds relative to run (multiple of SAMPLE_INTERVAL_SECONDS)
         best_start_seconds = best_start_index * SAMPLE_INTERVAL_SECONDS if best_channel is not None else 0
 
+        # determine top users for this run (up to 2) for storage
+        top_users_for_run = []
+        if leaderboard_items:
+            for uid, cnt in leaderboard_items:
+                team = get_user_team(uid)
+                if team == current_run_team:
+                    top_users_for_run.append(get_display_name(uid))
+                if len(top_users_for_run) >= 2:
+                    break
+
         if current_run_team:
             # append attempt record for that team
             team_accuracy_history[current_run_team].append({
@@ -294,7 +304,8 @@ async def run_timer(channel: discord.abc.Messageable):
                 # store numeric value or None
                 "accuracy": acc_value,
                 "best_1hour": best_1hour,
-                "best_1hour_start": best_start_seconds
+                "best_1hour_start": best_start_seconds,
+                "top_users": top_users_for_run
             })
 
         # persist data
@@ -315,11 +326,11 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel display name if possible
+    # get channel display name if possible (only the name, no numeric id)
     if best_channel is not None:
         ch_obj = bot.get_channel(best_channel)
-        ch_name = f" ({ch_obj.name})" if ch_obj else ""
-        best_channel_text = f"channel {best_channel}{ch_name}"
+        ch_name = ch_obj.name if ch_obj else None
+        best_channel_text = f"{ch_name}" if ch_name else "N/A"
         best_start_text = format_duration(best_start_seconds)
     else:
         best_channel_text = "N/A"
@@ -368,7 +379,10 @@ async def run(interaction: discord.Interaction):
                 acc_val = format_accuracy_value(correct, incorrect)
                 accuracy_text = "100%" if acc_val == 100 else (format_accuracy_display(acc_val) if acc_val is not None else "N/A")
 
-            items = sorted(run_counts_by_user.items(),key=lambda x: -x[1])
+            items = sorted(
+                run_counts_by_user.items(),
+                key=lambda x: -x[1]
+            )
 
             leaderboard = (
                 "\n".join(
@@ -403,7 +417,9 @@ async def run(interaction: discord.Interaction):
         run_snapshots_per_channel.clear()
         run_counts_by_channel.clear()
 
-    await interaction.response.send_message("24 hours attempt started! Stats are now being collected.")
+    await interaction.response.send_message(
+        "24 hours attempt started! Stats are now being collected."
+    )
 
     # start run timer and minute sampler
     bot.loop.create_task(run_timer(interaction.channel))
@@ -412,10 +428,16 @@ async def run(interaction: discord.Interaction):
 @bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
-        items = sorted(total_counts_by_user.items(), key=lambda x: -x[1])
+        items = sorted(
+            total_counts_by_user.items(),
+            key=lambda x: -x[1]
+        )
 
     if not items:
-        await interaction.response.send_message("No data available yet.", ephemeral=True)
+        await interaction.response.send_message(
+            "No data available yet.",
+            ephemeral=True
+        )
         return
 
     lines = []
@@ -445,6 +467,7 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
                 acc = run.get("accuracy")
                 if acc is None:
                     continue
+                # acc is numeric percent
                 entries.append((team, idx, float(acc)))
 
     if not entries:
@@ -499,10 +522,50 @@ async def leaderboard_numbers(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="leaderboard_fastest", description="Shows fastest 1-hour runs with top users and team.")
+async def leaderboard_fastest(interaction: discord.Interaction):
+    # collect (team, attempt_index, best_1hour, top_users)
+    entries = []
+    async with counts_lock:
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                best = int(run.get("best_1hour", 0))
+                if best <= 0:
+                    continue
+                top_users = run.get("top_users", []) or []
+                entries.append((team, idx, best, top_users))
+
+    if not entries:
+        await interaction.response.send_message("No fastest-run data available yet.")
+        return
+
+    # sort descending by best value
+    entries.sort(key=lambda x: -x[2])
+
+    lines = []
+    for rank, (team, attempt, best, top_users) in enumerate(entries, start=1):
+        if top_users:
+            # join up to 2 users with " & "
+            display_users = " & ".join(top_users[:2])
+            lines.append(f"**#{rank}** {display_users} - {team} , **{best:,}**")
+        else:
+            lines.append(f"**#{rank}** {team} , **{best:,}**")
+
+    embed = discord.Embed(
+        title="**FASTEST HOUR LEADERBOARD**",
+        description="\n".join(lines),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="show_data", description="Shows raw stored data).")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
-        await interaction.response.send_message("You are not allowed to use this command silly :p", ephemeral=True)
+        await interaction.response.send_message(
+            "You are not allowed to use this command silly :p",
+            ephemeral=True
+        )
         return
 
     async with counts_lock:
@@ -513,9 +576,12 @@ async def show_data(interaction: discord.Interaction):
             "team_accuracy_history": dict(team_accuracy_history),
         }
 
-    data_message = json.dumps(data_snapshot, indent=2)
+    pretty = json.dumps(data_snapshot, indent=2)
 
-    await interaction.response.send_message(f"```json\n{data_message}\n```", ephemeral=True)
+    await interaction.response.send_message(
+        f"```json\n{pretty}\n```",
+        ephemeral=True
+    )
 
 # -------- READY --------
 @bot.event
