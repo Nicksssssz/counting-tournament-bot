@@ -28,7 +28,9 @@ TRACK_CHANNELS = {
     1060539711871004734, #commands
     987737957530239026,  # dms
     1052340912216358993, # juiz
-    1343071180327751720  # eba
+    1343071180327751720,  # eba
+    1315525836341907560,  #classic col
+    1315492435115114517  # contando col
 }
 
 # -------- CONSTANTS --------
@@ -234,7 +236,7 @@ async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
     # keep existing sleep as in your file
-    await asyncio.sleep(5)
+    await asyncio.sleep(60*60+60*10)
 
     async with counts_lock:
         run_active = False
