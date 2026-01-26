@@ -234,7 +234,7 @@ async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
     # keep existing sleep as in your file
-    await asyncio.sleep(60*60+5)
+    await asyncio.sleep(5)
 
     async with counts_lock:
         run_active = False
@@ -313,7 +313,7 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel display name if possible (only the name, no numeric id)
+    # get channel display name if possible
     if best_channel is not None:
         ch_obj = bot.get_channel(best_channel)
         ch_name = ch_obj.name if ch_obj else None
