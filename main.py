@@ -326,8 +326,8 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title=f"**FINAL RUN STATS: {current_run_team.upper() if current_run_team else 'NO TEAM'}**",
         description=(
-            f"Best 1-hour run: **{best_1hour:,}** (in {best_channel_text})\n"
-            f"Started at (run time): **{best_start_text}**\n\n"
+            f"Best 1-hour run: **{best_1hour:,}**\n"
+            f"Started at: **{best_start_text}**\n\n"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
