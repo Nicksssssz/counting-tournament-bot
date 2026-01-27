@@ -26,9 +26,6 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 # -------- CHANNELS --------
 TRACK_CHANNELS = {
     1060539711871004734, #commands
-    987737957530239026,  # dms
-    1052340912216358993, # juiz
-    1343071180327751720,  # eba
     1315525836341907560,  #classic col
     1315492435115114517  # contando col
 }
@@ -236,7 +233,7 @@ async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
     # keep existing sleep as in your file
-    await asyncio.sleep(60*60+60*10)
+    await asyncio.sleep(60)
 
     async with counts_lock:
         run_active = False
@@ -330,6 +327,8 @@ async def run_timer(channel: discord.abc.Messageable):
         description=(
             f"Best 1-hour run: **{best_1hour:,}**\n"
             f"Started at: **{best_start_text}**\n\n"
+            f"Longest run: **09:22:34**\n"
+            f"Participants: **nicks** & **isa**\n\n"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
@@ -538,7 +537,7 @@ async def leaderboard_fastest(interaction: discord.Interaction):
             display_users = " & ".join(top_users[:2])
             lines.append(f"**#{rank}** {display_users} - {team} , **{best:,}**")
         else:
-            lines.append(f"**#{rank}** {team} , **{best:,}**")
+            lines.append(f"**#{rank}** {team}, **{best:,}**")
 
     embed = discord.Embed(
         title="**FASTEST RUN LEADERBOARD**",
