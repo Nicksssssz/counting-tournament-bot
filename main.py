@@ -323,9 +323,9 @@ async def run_timer(channel: discord.abc.Messageable):
         best_start_text = "00:00:00"
 
     embed = discord.Embed(
-        title=f"**FINAL RUN STATS: {current_run_team.upper() if current_run_team else 'NO TEAM'}**",
+        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #1 STATS:**",
         description=(
-            f"Best 1-hour run: **{best_1hour:,}**\n"
+            f"Fastest 1-hour run: **{best_1hour:,}**\n"
             f"Started at: **{best_start_text}**\n\n"
             f"Longest run: **09:22:34**\n"
             f"Participants: **nicks** & **isa**\n\n"
@@ -535,7 +535,7 @@ async def leaderboard_fastest(interaction: discord.Interaction):
         if top_users:
             # join up to 2 users with " & "
             display_users = " & ".join(top_users[:2])
-            lines.append(f"**#{rank}** {display_users} - {team} , **{best:,}**")
+            lines.append(f"**#{rank}** {display_users} - {team}, **{best:,}**")
         else:
             lines.append(f"**#{rank}** {team}, **{best:,}**")
 
