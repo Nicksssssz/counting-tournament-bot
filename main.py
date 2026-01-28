@@ -333,8 +333,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    # keep existing sleep as in your file
-    await asyncio.sleep(60)
+    await asyncio.sleep(60*15)
 
     async with counts_lock:
         run_active = False
@@ -413,21 +412,17 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel display name if possible (only the name, no numeric id)
+    # get start time
     if best_channel is not None:
-        ch_obj = bot.get_channel(best_channel)
-        ch_name = ch_obj.name if ch_obj else None
-        best_channel_text = f"{ch_name}" if ch_name else "N/A"
         best_start_text = format_duration(best_start_seconds)
     else:
-        best_channel_text = "N/A"
         best_start_text = "00:00:00"
 
     embed = discord.Embed(
         title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #1 STATS:**",
         description=(
-            f"Best 1-hour run: **{best_1hour:,}** (in {best_channel_text})\n"
-            f"Started at (run time): **{best_start_text}**\n\n"
+            f"Fastest 1-hour run: **{best_1hour:,}**\n"
+            f"Started at: **{best_start_text}**\n\n"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
@@ -654,7 +649,7 @@ async def leaderboard_fastest(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="show_data", description="Shows raw stored data).")
+@bot.tree.command(name="show_data", description="Shows raw stored data.")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
         await interaction.response.send_message(
