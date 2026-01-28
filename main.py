@@ -26,8 +26,9 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 # -------- CHANNELS --------
 TRACK_CHANNELS = {
     1060539711871004734, #commands
-    1315525836341907560,  #classic col
-    1315492435115114517  # contando col
+    1315525836341907560, #classic col
+    1315492435115114517, # contando col
+    1052340912216358993  # juiz
 }
 
 COMMANDS_CHANNEL_ID = 1060539711871004734
