@@ -343,7 +343,7 @@ async def on_message(message: discord.Message):
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team
 
-    await asyncio.sleep(60*15)
+    await asyncio.sleep(60*20)
 
     async with counts_lock:
         run_active = False
