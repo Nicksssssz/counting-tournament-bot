@@ -219,25 +219,33 @@ async def minute_sampler():
             # After sampling, check two-person runs for activity condition (100 numbers in last 10 minutes)
             samples_in_10min = (10 * 60) // SAMPLE_INTERVAL_SECONDS
             to_end = []
+            now_ts = time.time()
             for ch, state in list(two_person_runs.items()):
                 if not state.get("active"):
                     continue
                 runners = state["runners"]
+                run_start_time = state.get("start_time", now_ts)
+                # if this run hasn't reached 10 minutes since its own start, skip the check
+                if now_ts - run_start_time < 10 * 60:
+                    continue
                 # need snapshots for both users
                 snaps = run_user_snapshots_per_channel.get(ch, {})
-                # ensure both users present in snaps and enough samples
                 u1, u2 = runners
                 list1 = snaps.get(u1, [])
                 list2 = snaps.get(u2, [])
+                # ensure we have enough samples to look back samples_in_10min
                 if len(list1) <= samples_in_10min or len(list2) <= samples_in_10min:
-                    # not enough history yet -> keep running
+                    # not enough historical samples yet -> keep running until we have enough
                     continue
                 curr1 = list1[-1]
                 prev1 = list1[-1 - samples_in_10min]
                 curr2 = list2[-1]
                 prev2 = list2[-1 - samples_in_10min]
-                delta = (curr1 - prev1) + (curr2 - prev2)
-                if delta < 100:
+                delta1 = curr1 - prev1
+                delta2 = curr2 - prev2
+                delta = delta1 + delta2
+                # End run if combined < 100 OR if any runner contributed 0 in last 10 minutes
+                if delta < 100 or delta1 < 1 or delta2 < 1:
                     to_end.append(ch)
             # end runs that failed the check
             for ch in to_end:
