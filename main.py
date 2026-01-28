@@ -93,12 +93,16 @@ run_user_counts_by_channel = defaultdict(lambda: defaultdict(int))
 # per-channel per-user sampled snapshots lists
 run_user_snapshots_per_channel = defaultdict(lambda: defaultdict(list))
 
-# last 50 senders per channel (to detect 2-person start)
-last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=50))
+# last 40 senders per channel (to detect 2-person start) <- changed from 50 to 40
+last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=40))
 
 # two-person run state per channel
 # structure: ch_id -> { 'active': bool, 'runners': (uid1, uid2), 'start_time': float }
 two_person_runs = {}
+
+# history of two-person runs during the attempt, per channel
+# structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs } , ... ]
+run_two_person_history_per_channel = defaultdict(list)
 
 counts_lock = asyncio.Lock()
 
@@ -242,15 +246,22 @@ async def minute_sampler():
                     continue
                 runners = state["runners"]
                 start_time = state["start_time"]
-                duration = int(time.time() - start_time)
+                end_time = time.time()
+                duration = int(end_time - start_time)
                 duration_text = format_duration(duration)
-                # announce in commands channel
+                # append to history
+                run_two_person_history_per_channel[ch].append({
+                    "runners": runners,
+                    "start": start_time,
+                    "end": end_time,
+                    "duration": duration
+                })
+                # announce in commands channel (send clickable channel mention)
                 cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
                 runners_display = " & ".join(get_display_name(u) for u in runners)
-                ch_obj = bot.get_channel(ch)
-                ch_name = ch_obj.name if ch_obj else f"channel-{ch}"
+                ch_mention = f"<#{ch}>"
                 if cmd_ch:
-                    await cmd_ch.send(f"Run ended in **{ch_name}**! Runners: {runners_display}\nTotal time was: **{duration_text}**")
+                    await cmd_ch.send(f"Run ended in {ch_mention}!\nRunners: {runners_display}\nTotal time was: **{duration_text}**")
                 # remove state
                 del two_person_runs[ch]
 
@@ -303,11 +314,11 @@ async def on_message(message: discord.Message):
         # increment per-channel per-user counter
         run_user_counts_by_channel[message.channel.id][uid] += 1
 
-        # append sender to last-50 deque for that channel (for detection)
+        # append sender to last-40 deque for that channel (for detection)
         dq = last_50_senders_per_channel[message.channel.id]
         dq.append(uid)
 
-        # detection: if deque full (len==50) and plugin not already active, check unique senders
+        # detection: if deque full (len==40) and plugin not already active, check unique senders
         if len(dq) == dq.maxlen:
             unique = set(dq)
             if len(unique) == 2:
@@ -321,13 +332,12 @@ async def on_message(message: discord.Message):
                         "runners": runners,
                         "start_time": time.time()
                     }
-                    # announce in commands channel
+                    # announce in commands channel (clickable mention)
                     cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
                     runners_display = " & ".join(get_display_name(u) for u in runners)
-                    ch_obj = bot.get_channel(message.channel.id)
-                    ch_name = ch_obj.name if ch_obj else f"channel-{message.channel.id}"
+                    ch_mention = f"<#{message.channel.id}>"
                     if cmd_ch:
-                        await cmd_ch.send(f"A new run has started in **{ch_name}**\nRunners: {runners_display}")
+                        await cmd_ch.send(f"A new run has started in {ch_mention}\nRunners: {runners_display}")
 
 # -------- RUN TIMER --------
 async def run_timer(channel: discord.abc.Messageable):
@@ -382,6 +392,22 @@ async def run_timer(channel: discord.abc.Messageable):
                 if len(top_users_for_run) >= 2:
                     break
 
+        # finalize any still-active two-person runs as ending now and append to history
+        now_ts = time.time()
+        for ch, state in list(two_person_runs.items()):
+            if state.get("active"):
+                runners = state["runners"]
+                start_time = state["start_time"]
+                end_time = now_ts
+                duration = int(end_time - start_time)
+                run_two_person_history_per_channel[ch].append({
+                    "runners": runners,
+                    "start": start_time,
+                    "end": end_time,
+                    "duration": duration
+                })
+        # (do NOT delete two_person_runs here — we will clear after embed creation to preserve other logic)
+
         if current_run_team:
             # append attempt record for that team
             team_accuracy_history[current_run_team].append({
@@ -396,6 +422,17 @@ async def run_timer(channel: discord.abc.Messageable):
 
         # persist data
         save_data()
+
+        # compute longest two-person run across channels for this attempt
+        longest_duration = 0
+        longest_runners = None
+        longest_channel = None
+        for ch, runs in run_two_person_history_per_channel.items():
+            for rec in runs:
+                if rec["duration"] > longest_duration:
+                    longest_duration = rec["duration"]
+                    longest_runners = rec["runners"]
+                    longest_channel = ch
 
     # prepare display
     if total_attempts == 0:
@@ -412,17 +449,31 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get start time
+    # get channel mention (clickable) if possible
     if best_channel is not None:
+        best_channel_mention = f"<#{best_channel}>"
         best_start_text = format_duration(best_start_seconds)
     else:
+        best_channel_mention = "N/A"
         best_start_text = "00:00:00"
 
+    # longest run display
+    if longest_duration > 0 and longest_runners:
+        longest_duration_text = format_duration(longest_duration)
+        longest_participants = " & ".join(f"**{get_display_name(u)}**" for u in longest_runners)
+        longest_block = f"Longest run: **{longest_duration_text}**\nParticipants: {longest_participants}\n\n"
+    else:
+        longest_block = ""
+
+    # compute attempt number for the team (attempt #)
+    attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
+
     embed = discord.Embed(
-        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #1 STATS:**",
+        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #{attempt_number} STATS:**",
         description=(
-            f"Fastest 1-hour run: **{best_1hour:,}**\n"
+            f"Fastest 1-hour run: **{best_1hour:,}** (in {best_channel_mention})\n"
             f"Started at: **{best_start_text}**\n\n"
+            f"{longest_block}"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
@@ -444,6 +495,7 @@ async def run_timer(channel: discord.abc.Messageable):
     run_user_counts_by_channel.clear()
     last_50_senders_per_channel.clear()
     two_person_runs.clear()
+    run_two_person_history_per_channel.clear()
     current_run_team = None
 
 # -------- SLASH COMMANDS --------
@@ -506,6 +558,7 @@ async def start_run(interaction: discord.Interaction):
         run_user_snapshots_per_channel.clear()
         last_50_senders_per_channel.clear()
         two_person_runs.clear()
+        run_two_person_history_per_channel.clear()
 
     await interaction.response.send_message(
         "24 hours attempt started! Stats are now being collected."
