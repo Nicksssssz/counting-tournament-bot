@@ -6,7 +6,7 @@ import os
 import asyncio
 import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 
 # -------- ENV --------
 load_dotenv()
@@ -29,6 +29,8 @@ TRACK_CHANNELS = {
     1315525836341907560,  #classic col
     1315492435115114517  # contando col
 }
+
+COMMANDS_CHANNEL_ID = 1060539711871004734
 
 # -------- CONSTANTS --------
 MISTAKE_BOT_CHANNEL_ID = 510016054391734273
@@ -83,8 +85,20 @@ SAMPLE_INTERVAL_SECONDS = 10    # keep this (sampling resolution)
 # per-channel snapshots (cumulative totals sampled during run every SAMPLE_INTERVAL_SECONDS)
 run_snapshots_per_channel = defaultdict(list)
 
-# per-channel running counters during run
+# per-channel running counters during run (all users)
 run_counts_by_channel = defaultdict(int)
+
+# per-channel per-user cumulative counters during run
+run_user_counts_by_channel = defaultdict(lambda: defaultdict(int))
+# per-channel per-user sampled snapshots lists
+run_user_snapshots_per_channel = defaultdict(lambda: defaultdict(list))
+
+# last 50 senders per channel (to detect 2-person start)
+last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=50))
+
+# two-person run state per channel
+# structure: ch_id -> { 'active': bool, 'runners': (uid1, uid2), 'start_time': float }
+two_person_runs = {}
 
 counts_lock = asyncio.Lock()
 
@@ -167,13 +181,20 @@ async def minute_sampler():
     """
     Samples cumulative run counts once immediately at start, then every SAMPLE_INTERVAL_SECONDS seconds
     up to RUN_ANALYSIS_WINDOW_HOURS hours (or until the run ends).
-    Stores per-channel cumulative snapshots into run_snapshots_per_channel.
+    Stores per-channel cumulative snapshots into run_snapshots_per_channel and per-user snapshots into run_user_snapshots_per_channel.
+    Also checks active two-person runs every sample (to enforce 100 numbers in last 10 minutes rule).
     """
     total_samples = (RUN_ANALYSIS_WINDOW_HOURS * 3600) // SAMPLE_INTERVAL_SECONDS
     # initial snapshot at time 0 for each tracked channel
     async with counts_lock:
         for ch in TRACK_CHANNELS:
             run_snapshots_per_channel[ch].append(run_counts_by_channel.get(ch, 0))
+            # per-user: initialize existing users snapshot
+            users = set(run_user_counts_by_channel[ch].keys()) | set(run_user_snapshots_per_channel[ch].keys())
+            for u in users:
+                # initial value
+                val = run_user_counts_by_channel[ch].get(u, 0)
+                run_user_snapshots_per_channel[ch][u].append(val)
     for _ in range(total_samples):
         await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         async with counts_lock:
@@ -181,6 +202,57 @@ async def minute_sampler():
                 break
             for ch in TRACK_CHANNELS:
                 run_snapshots_per_channel[ch].append(run_counts_by_channel.get(ch, 0))
+                # per-user snapshots: ensure every tracked user has a value appended to keep lists aligned
+                users = set(run_user_counts_by_channel[ch].keys()) | set(run_user_snapshots_per_channel[ch].keys())
+                for u in users:
+                    val = run_user_counts_by_channel[ch].get(u, None)
+                    if val is None:
+                        # preserve last known value if user not present in current counts
+                        prev_list = run_user_snapshots_per_channel[ch].get(u, [])
+                        val = prev_list[-1] if prev_list else 0
+                    run_user_snapshots_per_channel[ch][u].append(val)
+
+            # After sampling, check two-person runs for activity condition (100 numbers in last 10 minutes)
+            samples_in_10min = (10 * 60) // SAMPLE_INTERVAL_SECONDS
+            to_end = []
+            for ch, state in list(two_person_runs.items()):
+                if not state.get("active"):
+                    continue
+                runners = state["runners"]
+                # need snapshots for both users
+                snaps = run_user_snapshots_per_channel.get(ch, {})
+                # ensure both users present in snaps and enough samples
+                u1, u2 = runners
+                list1 = snaps.get(u1, [])
+                list2 = snaps.get(u2, [])
+                if len(list1) <= samples_in_10min or len(list2) <= samples_in_10min:
+                    # not enough history yet -> keep running
+                    continue
+                curr1 = list1[-1]
+                prev1 = list1[-1 - samples_in_10min]
+                curr2 = list2[-1]
+                prev2 = list2[-1 - samples_in_10min]
+                delta = (curr1 - prev1) + (curr2 - prev2)
+                if delta < 100:
+                    to_end.append(ch)
+            # end runs that failed the check
+            for ch in to_end:
+                state = two_person_runs.get(ch)
+                if not state:
+                    continue
+                runners = state["runners"]
+                start_time = state["start_time"]
+                duration = int(time.time() - start_time)
+                duration_text = format_duration(duration)
+                # announce in commands channel
+                cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
+                runners_display = " & ".join(get_display_name(u) for u in runners)
+                ch_obj = bot.get_channel(ch)
+                ch_name = ch_obj.name if ch_obj else f"channel-{ch}"
+                if cmd_ch:
+                    await cmd_ch.send(f"Run ended in **{ch_name}**! Runners: {runners_display}\nTotal time was: **{duration_text}**")
+                # remove state
+                del two_person_runs[ch]
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -227,6 +299,35 @@ async def on_message(message: discord.Message):
 
         # increment per-channel running counter
         run_counts_by_channel[message.channel.id] += 1
+
+        # increment per-channel per-user counter
+        run_user_counts_by_channel[message.channel.id][uid] += 1
+
+        # append sender to last-50 deque for that channel (for detection)
+        dq = last_50_senders_per_channel[message.channel.id]
+        dq.append(uid)
+
+        # detection: if deque full (len==50) and plugin not already active, check unique senders
+        if len(dq) == dq.maxlen:
+            unique = set(dq)
+            if len(unique) == 2:
+                runners = tuple(sorted(unique))
+                # if there's no active two-person run for this channel, start one
+                state = two_person_runs.get(message.channel.id)
+                if not state or not state.get("active"):
+                    # start the two-person run
+                    two_person_runs[message.channel.id] = {
+                        "active": True,
+                        "runners": runners,
+                        "start_time": time.time()
+                    }
+                    # announce in commands channel
+                    cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
+                    runners_display = " & ".join(get_display_name(u) for u in runners)
+                    ch_obj = bot.get_channel(message.channel.id)
+                    ch_name = ch_obj.name if ch_obj else f"channel-{message.channel.id}"
+                    if cmd_ch:
+                        await cmd_ch.send(f"A new run has started in **{ch_name}**\nRunners: {runners_display}")
 
 # -------- RUN TIMER --------
 async def run_timer(channel: discord.abc.Messageable):
@@ -312,7 +413,7 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel display name if possible
+    # get channel display name if possible (only the name, no numeric id)
     if best_channel is not None:
         ch_obj = bot.get_channel(best_channel)
         ch_name = ch_obj.name if ch_obj else None
@@ -325,10 +426,8 @@ async def run_timer(channel: discord.abc.Messageable):
     embed = discord.Embed(
         title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #1 STATS:**",
         description=(
-            f"Fastest 1-hour run: **{best_1hour:,}**\n"
-            f"Started at: **{best_start_text}**\n\n"
-            f"Longest run: **09:22:34**\n"
-            f"Participants: **nicks** & **isa**\n\n"
+            f"Best 1-hour run: **{best_1hour:,}** (in {best_channel_text})\n"
+            f"Started at (run time): **{best_start_text}**\n\n"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
             f"❌ **{incorrect:,}**\n\n"
@@ -345,7 +444,11 @@ async def run_timer(channel: discord.abc.Messageable):
     run_counts_by_user.clear()
     run_team_mistakes.clear()
     run_snapshots_per_channel.clear()
+    run_user_snapshots_per_channel.clear()
     run_counts_by_channel.clear()
+    run_user_counts_by_channel.clear()
+    last_50_senders_per_channel.clear()
+    two_person_runs.clear()
     current_run_team = None
 
 # -------- SLASH COMMANDS --------
@@ -404,6 +507,10 @@ async def start_run(interaction: discord.Interaction):
         run_team_mistakes.clear()
         run_snapshots_per_channel.clear()
         run_counts_by_channel.clear()
+        run_user_counts_by_channel.clear()
+        run_user_snapshots_per_channel.clear()
+        last_50_senders_per_channel.clear()
+        two_person_runs.clear()
 
     await interaction.response.send_message(
         "24 hours attempt started! Stats are now being collected."
