@@ -76,7 +76,7 @@ total_counts_by_user = defaultdict(int)
 run_counts_by_user = defaultdict(int)
 run_team_mistakes = defaultdict(int)
 
-# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1hour": int, "best_1hour_start": int, "top_users": [str,...] }
+# store per-team attempt history: team -> list of { "correct": int, "incorrect": int, "accuracy": float or None, "best_1hour": int, "best_1hour_start": int, "top_users": [str,...], "two_person_runs": [...] }
 team_accuracy_history = defaultdict(list)
 
 # For fastest 1-hour sliding window analysis
@@ -165,6 +165,12 @@ def format_duration(seconds: int) -> str:
     m = (seconds % 3600) // 60
     s = seconds % 60
     return f"{h:02}:{m:02}:{s:02}"
+
+def format_duration_hours_minutes(seconds: int) -> str:
+    # For leaderboard_longest display as HH:MM (no seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    return f"{h:02}:{m:02}"
 
 def format_accuracy_value(correct: int, incorrect: int):
     total = correct + incorrect
@@ -271,8 +277,10 @@ async def minute_sampler():
                 ch_mention = f"<#{ch}>"
                 if cmd_ch:
                     await cmd_ch.send(f"Run ended in {ch_mention}!\nRunners: {runners_display}\nTotal time was: **{duration_text}**")
-                # remove state
-                del two_person_runs[ch]
+                # remove state and clear the recent-senders deque so we don't immediately restart
+                if ch in two_person_runs:
+                    del two_person_runs[ch]
+                last_50_senders_per_channel[ch].clear()
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -409,16 +417,30 @@ async def run_timer(channel: discord.abc.Messageable):
                 start_time = state["start_time"]
                 end_time = now_ts
                 duration = int(end_time - start_time)
+                # append record into run_two_person_history_per_channel
                 run_two_person_history_per_channel[ch].append({
                     "runners": runners,
                     "start": start_time,
                     "end": end_time,
                     "duration": duration
                 })
-        # (do NOT delete two_person_runs here — we will clear after embed creation to preserve other logic)
+                # clear the recent-senders deque for that channel so we don't immediately restart
+                last_50_senders_per_channel[ch].clear()
+
+        # prepare two_person_runs flattened summary for storing in attempt record
+        two_runs_flat = []
+        for ch, runs in run_two_person_history_per_channel.items():
+            for rec in runs:
+                two_runs_flat.append({
+                    "channel": ch,
+                    "runners": rec["runners"],
+                    "start": rec["start"],
+                    "end": rec["end"],
+                    "duration": rec["duration"]
+                })
 
         if current_run_team:
-            # append attempt record for that team
+            # append attempt record for that team (include two_person_runs)
             team_accuracy_history[current_run_team].append({
                 "correct": correct,
                 "incorrect": incorrect,
@@ -426,7 +448,8 @@ async def run_timer(channel: discord.abc.Messageable):
                 "accuracy": acc_value,
                 "best_1hour": best_1hour,
                 "best_1hour_start": best_start_seconds,
-                "top_users": top_users_for_run
+                "top_users": top_users_for_run,
+                "two_person_runs": two_runs_flat
             })
 
         # persist data
@@ -705,6 +728,42 @@ async def leaderboard_fastest(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="**FASTEST RUN LEADERBOARD**",
+        description="\n".join(lines),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="leaderboard_longest", description="Shows longest two-person runs across attempts.")
+async def leaderboard_longest(interaction: discord.Interaction):
+    # collect (duration_secs, team, attempt_index, runners_display)
+    entries = []
+    async with counts_lock:
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                two_runs = run.get("two_person_runs", []) or []
+                for rec in two_runs:
+                    dur = int(rec.get("duration", 0))
+                    runners = rec.get("runners", ())
+                    # convert runners ids to display names
+                    names = [get_display_name(u) for u in runners]
+                    runners_display = " & ".join(names[:2])
+                    entries.append((dur, team, idx, runners_display))
+
+    if not entries:
+        await interaction.response.send_message("No two-person run data available yet.")
+        return
+
+    # sort descending by duration
+    entries.sort(key=lambda x: -x[0])
+
+    lines = []
+    for rank, (dur, team, attempt_idx, runners_display) in enumerate(entries, start=1):
+        dur_text = format_duration_hours_minutes(dur)
+        lines.append(f"**#{rank}** {runners_display} - {team}, **{dur_text}** hours")
+
+    embed = discord.Embed(
+        title="**LONGEST RUN LEADERBOARD**",
         description="\n".join(lines),
         color=0xCCA958
     )
