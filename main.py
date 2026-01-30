@@ -600,7 +600,7 @@ async def start_run(interaction: discord.Interaction):
     bot.loop.create_task(run_timer(interaction.channel))
     bot.loop.create_task(minute_sampler())
 
-@bot.tree.command(name="leaderboard_users", description="Shows total numbers counted by each user and which team they belong to.")
+@bot.tree.command(name="top_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
         items = sorted(
