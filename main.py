@@ -466,6 +466,38 @@ async def run_timer(channel: discord.abc.Messageable):
                     longest_runners = rec["runners"]
                     longest_channel = ch
 
+        # --- NEW: determine participants for the best 1-hour window ---
+        # We'll find the two users who contributed the most during that window in best_channel.
+        best_participants_display = ""
+        if best_channel is not None and best_1hour > 0:
+            snaps = run_user_snapshots_per_channel.get(best_channel, {})
+            start_idx = best_start_index
+            end_idx = best_start_index + window_samples
+            # compute delta per user
+            deltas = []
+            for uid, lst in snaps.items():
+                # ensure indexes available
+                if len(lst) > end_idx:
+                    delta = lst[end_idx] - lst[start_idx]
+                else:
+                    # if snapshot list is short, attempt safe access
+                    try:
+                        end_val = lst[end_idx] if end_idx < len(lst) else lst[-1]
+                        start_val = lst[start_idx] if start_idx < len(lst) else lst[0]
+                        delta = end_val - start_val
+                    except Exception:
+                        delta = 0
+                deltas.append((delta, uid))
+            # sort and pick top two contributors (positive deltas)
+            deltas.sort(key=lambda x: -x[0])
+            top_uids = [uid for d, uid in deltas if d > 0][:2]
+            if top_uids:
+                best_participants_display = " & ".join(f"**{get_display_name(u)}**" for u in top_uids)
+            else:
+                best_participants_display = "N/A"
+        else:
+            best_participants_display = "N/A"
+
     # prepare display
     if total_attempts == 0:
         accuracy_text = "N/A"
@@ -504,7 +536,7 @@ async def run_timer(channel: discord.abc.Messageable):
         title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #{attempt_number} STATS:**",
         description=(
             f"Fastest 1-hour run: **{best_1hour:,}**\n"
-            f"Started at: **{best_start_text}**\n\n"
+            f"Participants: {best_participants_display}\n\n"
             f"{longest_block}"
             f"Correct Rate: **{accuracy_text}**\n"
             f"✅ **{correct:,}**\n"
