@@ -37,6 +37,12 @@ COMMANDS_CHANNEL_ID = 1060539711871004734
 MISTAKE_BOT_CHANNEL_ID = 510016054391734273
 MISTAKE_BOT_RUINED_ID = 639599059036012605
 
+# two-person run thresholds
+TWO_PERSON_DETECTION_WINDOW = 40     # how many recent messages to inspect to detect a 2-person pair
+TWO_PERSON_MIN_COUNT = 95            # changed from 100 -> 95 (numbers in last 10 minutes required)
+TWO_PERSON_WARNING_MINUTES = 9       # send warning if last 9 minutes < TWO_PERSON_MIN_COUNT
+TWO_PERSON_CHECK_MINUTES = 10        # check inactivity over last 10 minutes
+
 # -------- TEAMS --------
 user_team_mapping = {
     749049630775312524: "eba",
@@ -94,11 +100,11 @@ run_user_counts_by_channel = defaultdict(lambda: defaultdict(int))
 # per-channel per-user sampled snapshots lists
 run_user_snapshots_per_channel = defaultdict(lambda: defaultdict(list))
 
-# last 40 senders per channel (to detect 2-person start)
-last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=40))
+# last N senders per channel (to detect 2-person start)
+last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=TWO_PERSON_DETECTION_WINDOW))
 
 # two-person run state per channel
-# structure: ch_id -> { 'active': bool, 'runners': (uid1, uid2), 'start_time': float }
+# structure: ch_id -> { 'active': bool, 'runners': (uid1, uid2), 'start_time': float, 'warned': bool }
 two_person_runs = {}
 
 # history of two-person runs during the attempt, per channel
@@ -162,7 +168,9 @@ def is_valid_count_message(content: str) -> bool:
     content = content.lstrip()
     if not content:
         return False
-    return content.split(" ", 1)[0].isdigit()
+    # valid if begins with digits and next char (if any) is whitespace or end-of-string
+    first_token = content.split(" ", 1)[0]
+    return first_token.isdigit()
 
 def format_duration(seconds: int) -> str:
     h = seconds // 3600
@@ -191,13 +199,57 @@ def format_accuracy_display(acc_value):
         return "100%"
     return f"{acc_value:06.3f}%"
 
+# -------- UTIL: finalize two-person run --------
+def _append_two_person_history(ch: int, runners: tuple, start_ts: float, end_ts: float):
+    duration = int(end_ts - start_ts)
+    run_two_person_history_per_channel[ch].append({
+        "runners": runners,
+        "start": start_ts,
+        "end": end_ts,
+        "duration": duration
+    })
+
+async def finalize_two_person_run(ch: int, *, end_ts: float = None, clear_deque: bool = True, announce_in_commands: bool = True):
+    """
+    Finalize an active two-person run in channel ch.
+    - end_ts: optional explicit end timestamp (defaults to now)
+    - clear_deque: if True, clear the last-N deque to avoid immediate restart
+    - announce_in_commands: if True, post a 'Run ended' message to the commands channel
+    """
+    if end_ts is None:
+        end_ts = time.time()
+    state = two_person_runs.get(ch)
+    if not state:
+        return
+    runners = state["runners"]
+    start_ts = state.get("start_time", end_ts)
+    _append_two_person_history(ch, runners, start_ts, end_ts)
+
+    if announce_in_commands:
+        duration = int(end_ts - start_ts)
+        duration_text = format_duration(duration)
+        cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
+        runners_display = " & ".join(get_display_name(u) for u in runners)
+        ch_mention = f"<#{ch}>"
+        if cmd_ch:
+            await cmd_ch.send(f"Run ended in {ch_mention}!\nRunners: {runners_display}\nTotal time was: **{duration_text}**")
+
+    # remove active run state
+    if ch in two_person_runs:
+        del two_person_runs[ch]
+
+    # clear deque if requested
+    if clear_deque:
+        last_50_senders_per_channel[ch].clear()
+
 # -------- SECONDARY SAMPLER TASK (every SAMPLE_INTERVAL_SECONDS) --------
 async def minute_sampler():
     """
     Samples cumulative run counts once immediately at start, then every SAMPLE_INTERVAL_SECONDS seconds
     up to RUN_ANALYSIS_WINDOW_HOURS hours (or until the run ends).
     Stores per-channel cumulative snapshots into run_snapshots_per_channel and per-user snapshots into run_user_snapshots_per_channel.
-    Also checks active two-person runs every sample (to enforce 100 numbers in last 10 minutes rule).
+    Also checks active two-person runs every sample (to enforce TWO_PERSON_MIN_COUNT numbers in last TWO_PERSON_CHECK_MINUTES).
+    Sends a 9-minute warning when appropriate.
     """
     total_samples = (RUN_ANALYSIS_WINDOW_HOURS * 3600) // SAMPLE_INTERVAL_SECONDS
     # initial snapshot at time 0 for each tracked channel
@@ -207,28 +259,29 @@ async def minute_sampler():
             # per-user: initialize existing users snapshot
             users = set(run_user_counts_by_channel[ch].keys()) | set(run_user_snapshots_per_channel[ch].keys())
             for u in users:
-                # initial value
                 val = run_user_counts_by_channel[ch].get(u, 0)
                 run_user_snapshots_per_channel[ch][u].append(val)
+
+    samples_in_10min = (TWO_PERSON_CHECK_MINUTES * 60) // SAMPLE_INTERVAL_SECONDS
+    samples_in_9min = (TWO_PERSON_WARNING_MINUTES * 60) // SAMPLE_INTERVAL_SECONDS
+
     for _ in range(total_samples):
         await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         async with counts_lock:
             if not run_active:
                 break
+
             for ch in TRACK_CHANNELS:
                 run_snapshots_per_channel[ch].append(run_counts_by_channel.get(ch, 0))
-                # per-user snapshots: ensure every tracked user has a value appended to keep lists aligned
                 users = set(run_user_counts_by_channel[ch].keys()) | set(run_user_snapshots_per_channel[ch].keys())
                 for u in users:
                     val = run_user_counts_by_channel[ch].get(u, None)
                     if val is None:
-                        # preserve last known value if user not present in current counts
                         prev_list = run_user_snapshots_per_channel[ch].get(u, [])
                         val = prev_list[-1] if prev_list else 0
                     run_user_snapshots_per_channel[ch][u].append(val)
 
-            # After sampling, check two-person runs for activity condition (100 numbers in last 10 minutes)
-            samples_in_10min = (10 * 60) // SAMPLE_INTERVAL_SECONDS
+            # After sampling, check two-person runs for activity condition (TWO_PERSON_MIN_COUNT in last 10 minutes)
             to_end = []
             now_ts = time.time()
             for ch, state in list(two_person_runs.items()):
@@ -236,18 +289,39 @@ async def minute_sampler():
                     continue
                 runners = state["runners"]
                 run_start_time = state.get("start_time", now_ts)
-                # if this run hasn't reached 10 minutes since its own start, skip the check
-                if now_ts - run_start_time < 10 * 60:
+
+                # WARNING: check the 9-minute warning if run has been active long enough and not yet warned
+                if (now_ts - run_start_time) >= (TWO_PERSON_WARNING_MINUTES * 60) and not state.get("warned", False):
+                    snaps = run_user_snapshots_per_channel.get(ch, {})
+                    u1, u2 = runners
+                    list1 = snaps.get(u1, [])
+                    list2 = snaps.get(u2, [])
+                    if len(list1) > samples_in_9min and len(list2) > samples_in_9min:
+                        curr1 = list1[-1]
+                        prev1 = list1[-1 - samples_in_9min]
+                        curr2 = list2[-1]
+                        prev2 = list2[-1 - samples_in_9min]
+                        delta9 = (curr1 - prev1) + (curr2 - prev2)
+                        if delta9 < TWO_PERSON_MIN_COUNT:
+                            # send a single warning in commands channel mentioning the active channel
+                            cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
+                            ch_mention = f"<#{ch}>"
+                            if cmd_ch:
+                                await cmd_ch.send(f"The current run in {ch_mention} is close to ending for inactivity!")
+                            state['warned'] = True  # mark warned so we don't spam
+
+                # Only check full inactivity rule if run has existed at least TWO_PERSON_CHECK_MINUTES
+                if now_ts - run_start_time < (TWO_PERSON_CHECK_MINUTES * 60):
                     continue
-                # need snapshots for both users
+
                 snaps = run_user_snapshots_per_channel.get(ch, {})
                 u1, u2 = runners
                 list1 = snaps.get(u1, [])
                 list2 = snaps.get(u2, [])
-                # ensure we have enough samples to look back samples_in_10min
                 if len(list1) <= samples_in_10min or len(list2) <= samples_in_10min:
-                    # not enough historical samples yet -> keep running until we have enough
+                    # still not enough samples -> wait
                     continue
+
                 curr1 = list1[-1]
                 prev1 = list1[-1 - samples_in_10min]
                 curr2 = list2[-1]
@@ -255,36 +329,15 @@ async def minute_sampler():
                 delta1 = curr1 - prev1
                 delta2 = curr2 - prev2
                 delta = delta1 + delta2
-                # End run if combined < 100 OR if any runner contributed 0 in last 10 minutes
-                if delta < 100 or delta1 < 1 or delta2 < 1:
+
+                # End run if combined < TWO_PERSON_MIN_COUNT OR if any runner contributed 0 in last 10 minutes
+                if delta < TWO_PERSON_MIN_COUNT or delta1 < 1 or delta2 < 1:
                     to_end.append(ch)
-            # end runs that failed the check
+
+            # End the runs that failed the check (inactivity). Announce in commands channel and clear deque.
             for ch in to_end:
-                state = two_person_runs.get(ch)
-                if not state:
-                    continue
-                runners = state["runners"]
-                start_time = state["start_time"]
-                end_time = time.time()
-                duration = int(end_time - start_time)
-                duration_text = format_duration(duration)
-                # append to history
-                run_two_person_history_per_channel[ch].append({
-                    "runners": runners,
-                    "start": start_time,
-                    "end": end_time,
-                    "duration": duration
-                })
-                # announce in commands channel (send clickable channel mention)
-                cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
-                runners_display = " & ".join(get_display_name(u) for u in runners)
-                ch_mention = f"<#{ch}>"
-                if cmd_ch:
-                    await cmd_ch.send(f"Run ended in {ch_mention}!\nRunners: {runners_display}\nTotal time was: **{duration_text}**")
-                # remove state and clear the recent-senders deque so we don't immediately restart
-                if ch in two_person_runs:
-                    del two_person_runs[ch]
-                last_50_senders_per_channel[ch].clear()
+                # finalize and clear_deque=True so we don't immediately restart accidentally
+                await finalize_two_person_run(ch, clear_deque=True, announce_in_commands=True)
 
 # -------- MESSAGE LISTENER --------
 @bot.event
@@ -335,23 +388,23 @@ async def on_message(message: discord.Message):
         # increment per-channel per-user counter
         run_user_counts_by_channel[message.channel.id][uid] += 1
 
-        # append sender to last-40 deque for that channel (for detection)
+        # append sender to last-N deque for that channel (for detection)
         dq = last_50_senders_per_channel[message.channel.id]
         dq.append(uid)
 
-        # detection: if deque full (len==40) and plugin not already active, check unique senders
+        # detection: if deque full and plugin not already active, check unique senders
         if len(dq) == dq.maxlen:
             unique = set(dq)
             if len(unique) == 2:
                 runners = tuple(sorted(unique))
-                # if there's no active two-person run for this channel, start one
                 state = two_person_runs.get(message.channel.id)
                 if not state or not state.get("active"):
-                    # start the two-person run
+                    # no active run -> start it
                     two_person_runs[message.channel.id] = {
                         "active": True,
                         "runners": runners,
-                        "start_time": time.time()
+                        "start_time": time.time(),
+                        "warned": False
                     }
                     # announce in commands channel (clickable mention)
                     cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
@@ -359,16 +412,33 @@ async def on_message(message: discord.Message):
                     ch_mention = f"<#{message.channel.id}>"
                     if cmd_ch:
                         await cmd_ch.send(f"A new run has started in {ch_mention}\nRunners: {runners_display}")
+                else:
+                    # there is an active run in this channel
+                    current_runners = state.get("runners")
+                    if current_runners != runners:
+                        # NEW pair detected — finalize old run and START new run immediately
+                        # finalize previous run but do NOT clear deque (so new run detection continues)
+                        await finalize_two_person_run(message.channel.id, clear_deque=False, announce_in_commands=True)
+                        # start the new run
+                        two_person_runs[message.channel.id] = {
+                            "active": True,
+                            "runners": runners,
+                            "start_time": time.time(),
+                            "warned": False
+                        }
+                        cmd_ch = bot.get_channel(COMMANDS_CHANNEL_ID)
+                        runners_display = " & ".join(get_display_name(u) for u in runners)
+                        ch_mention = f"<#{message.channel.id}>"
+                        if cmd_ch:
+                            await cmd_ch.send(f"A new run has started in {ch_mention}\nRunners: {runners_display}")
 
-# -------- RUN TIMER --------
+# -------- RUN TIMER (finalize attempt) --------
 async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team, run_timer_task
 
-    # original sleep duration preserved
+    # original sleep duration preserved (kept same as you had)
     await asyncio.sleep(60*15)
 
-    # When the timer completes naturally, perform the same finalization as /end_run does
-    # (the logic below is unchanged and mirrors the end-run flow)
     async with counts_lock:
         run_active = False
 
@@ -390,12 +460,10 @@ async def run_timer(channel: discord.abc.Messageable):
         best_channel = None
         best_start_index = 0
         window_samples = FASTEST_WINDOW_SECONDS // SAMPLE_INTERVAL_SECONDS
-        # iterate channels and compute deltas
         for ch, snapshots in run_snapshots_per_channel.items():
             N = len(snapshots)
             if N <= window_samples:
                 continue
-            # scan all possible windows
             for i in range(0, N - window_samples):
                 delta = snapshots[i + window_samples] - snapshots[i]
                 if delta > best_1hour:
@@ -403,7 +471,6 @@ async def run_timer(channel: discord.abc.Messageable):
                     best_channel = ch
                     best_start_index = i
 
-        # compute start seconds relative to run (multiple of SAMPLE_INTERVAL_SECONDS)
         best_start_seconds = best_start_index * SAMPLE_INTERVAL_SECONDS if best_channel is not None else 0
 
         # determine top users for this run (up to 2) for storage
@@ -416,23 +483,11 @@ async def run_timer(channel: discord.abc.Messageable):
                 if len(top_users_for_run) >= 2:
                     break
 
-        # finalize any still-active two-person runs as ending now and append to history
+        # finalize any still-active two-person runs as ending now and append to history (clear deque)
         now_ts = time.time()
         for ch, state in list(two_person_runs.items()):
             if state.get("active"):
-                runners = state["runners"]
-                start_time = state["start_time"]
-                end_time = now_ts
-                duration = int(end_time - start_time)
-                # append record into run_two_person_history_per_channel
-                run_two_person_history_per_channel[ch].append({
-                    "runners": runners,
-                    "start": start_time,
-                    "end": end_time,
-                    "duration": duration
-                })
-                # clear the recent-senders deque for that channel so we don't immediately restart
-                last_50_senders_per_channel[ch].clear()
+                await finalize_two_person_run(ch, end_ts=now_ts, clear_deque=True, announce_in_commands=False)
 
         # prepare two_person_runs flattened summary for storing in attempt record
         two_runs_flat = []
@@ -447,11 +502,9 @@ async def run_timer(channel: discord.abc.Messageable):
                 })
 
         if current_run_team:
-            # append attempt record for that team (include two_person_runs)
             team_accuracy_history[current_run_team].append({
                 "correct": correct,
                 "incorrect": incorrect,
-                # store numeric value or None
                 "accuracy": acc_value,
                 "best_1hour": best_1hour,
                 "best_1hour_start": best_start_seconds,
@@ -473,16 +526,14 @@ async def run_timer(channel: discord.abc.Messageable):
                     longest_runners = rec["runners"]
                     longest_channel = ch
 
-        # --- determine participants for the best 1-hour window ---
+        # determine participants for the best 1-hour window
         best_participants_display = ""
         if best_channel is not None and best_1hour > 0:
             snaps = run_user_snapshots_per_channel.get(best_channel, {})
             start_idx = best_start_index
             end_idx = best_start_index + window_samples
-            # compute delta per user
             deltas = []
             for uid, lst in snaps.items():
-                # ensure indexes available
                 if len(lst) > end_idx:
                     delta = lst[end_idx] - lst[start_idx]
                 else:
@@ -493,7 +544,6 @@ async def run_timer(channel: discord.abc.Messageable):
                     except Exception:
                         delta = 0
                 deltas.append((delta, uid))
-            # sort and pick top two contributors (positive deltas)
             deltas.sort(key=lambda x: -x[0])
             top_uids = [uid for d, uid in deltas if d > 0][:2]
             if top_uids:
@@ -518,7 +568,7 @@ async def run_timer(channel: discord.abc.Messageable):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel mention (clickable) if possible
+    # get best channel mention if possible
     if best_channel is not None:
         best_channel_mention = f"<#{best_channel}>"
     else:
@@ -532,7 +582,6 @@ async def run_timer(channel: discord.abc.Messageable):
     else:
         longest_block = ""
 
-    # compute attempt number for the team (attempt #)
     attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
 
     embed = discord.Embed(
@@ -550,7 +599,6 @@ async def run_timer(channel: discord.abc.Messageable):
     )
 
     message = await channel.send(embed=embed)
-
     await message.pin()
 
     # clear run-only state
@@ -565,7 +613,6 @@ async def run_timer(channel: discord.abc.Messageable):
     run_two_person_history_per_channel.clear()
     current_run_team = None
 
-    # mark task variable as done
     run_timer_task = None
 
 # -------- SLASH COMMANDS --------
@@ -705,19 +752,9 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
         now_ts = time.time()
         for ch, state in list(two_person_runs.items()):
             if state.get("active"):
-                runners = state["runners"]
-                start_time = state["start_time"]
-                end_time = now_ts
-                duration = int(end_time - start_time)
-                # append record into run_two_person_history_per_channel
-                run_two_person_history_per_channel[ch].append({
-                    "runners": runners,
-                    "start": start_time,
-                    "end": end_time,
-                    "duration": duration
-                })
-                # clear the recent-senders deque for that channel so we don't immediately restart
-                last_50_senders_per_channel[ch].clear()
+                # use finalize helper -> clear_deque=True (because this is an official end)
+                await finalize_two_person_run(ch, end_ts=now_ts, clear_deque=True, announce_in_commands=True)
+
         # prepare two_person_runs flattened summary for storing in attempt record
         two_runs_flat = []
         for ch, runs in run_two_person_history_per_channel.items():
@@ -731,7 +768,6 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
                 })
 
         if current_run_team and save:
-            # append attempt record for that team (include two_person_runs)
             team_accuracy_history[current_run_team].append({
                 "correct": correct,
                 "incorrect": incorrect,
@@ -742,7 +778,6 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
                 "two_person_runs": two_runs_flat
             })
 
-        # persist data only if save=True
         if save:
             save_data()
 
@@ -757,7 +792,7 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
                     longest_runners = rec["runners"]
                     longest_channel = ch
 
-        # --- determine participants for the best 1-hour window ---
+        # determine participants for the best 1-hour window
         best_participants_display = ""
         if best_channel is not None and best_1hour > 0:
             snaps = run_user_snapshots_per_channel.get(best_channel, {})
@@ -799,13 +834,11 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
             lines.append(f"**#{i}** {name}, **{count:,}**")
         leaderboard_text = "\n".join(lines)
 
-    # get channel mention (clickable) if possible
     if best_channel is not None:
         best_channel_mention = f"<#{best_channel}>"
     else:
         best_channel_mention = "N/A"
 
-    # longest run display
     if longest_duration > 0 and longest_runners:
         longest_duration_text = format_duration(longest_duration)
         longest_participants = " & ".join(f"**{get_display_name(u)}**" for u in longest_runners)
@@ -813,7 +846,6 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
     else:
         longest_block = ""
 
-    # compute attempt number for the team (attempt #) — only meaningful if saved
     attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
 
     embed = discord.Embed(
@@ -832,7 +864,7 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
 
     await interaction.response.send_message(embed=embed)
 
-    # clear run-only state (same as normal finalization)
+    # clear run-only state
     async with counts_lock:
         run_counts_by_user.clear()
         run_team_mistakes.clear()
@@ -844,10 +876,10 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
         two_person_runs.clear()
         run_two_person_history_per_channel.clear()
         current_run_team = None
-        # clear task refs
         run_timer_task = None
         run_sampler_task = None
 
+# -------- OTHER SLASH COMMANDS (leaderboards, show_data) kept unchanged --------
 @bot.tree.command(name="top_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
@@ -882,7 +914,6 @@ async def leaderboard_users(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard_accuracy", description="Shows accuracy leaderboard for all team attempts.")
 async def leaderboard_accuracy(interaction: discord.Interaction):
-    # collect (team, attempt_index, accuracy_value)
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
@@ -890,14 +921,12 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
                 acc = run.get("accuracy")
                 if acc is None:
                     continue
-                # acc is numeric percent
                 entries.append((team, idx, float(acc)))
 
     if not entries:
         await interaction.response.send_message("No accuracy data available yet.")
         return
 
-    # sort descending by accuracy
     entries.sort(key=lambda x: -x[2])
 
     lines = []
@@ -918,7 +947,6 @@ async def leaderboard_accuracy(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard_numbers", description="Shows numbers counted per team attempt.")
 async def leaderboard_numbers(interaction: discord.Interaction):
-    # collect (team, attempt_index, correct_count)
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
@@ -930,7 +958,6 @@ async def leaderboard_numbers(interaction: discord.Interaction):
         await interaction.response.send_message("No run data available yet.")
         return
 
-    # sort descending by count
     entries.sort(key=lambda x: -x[2])
 
     lines = []
@@ -947,7 +974,6 @@ async def leaderboard_numbers(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard_fastest", description="Shows fastest 1-hour runs with top users and team.")
 async def leaderboard_fastest(interaction: discord.Interaction):
-    # collect (team, attempt_index, best_1hour, top_users)
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
@@ -962,13 +988,11 @@ async def leaderboard_fastest(interaction: discord.Interaction):
         await interaction.response.send_message("No fastest-run data available yet.")
         return
 
-    # sort descending by best value
     entries.sort(key=lambda x: -x[2])
 
     lines = []
     for rank, (team, attempt, best, top_users) in enumerate(entries, start=1):
         if top_users:
-            # join up to 2 users with " & "
             display_users = " & ".join(top_users[:2])
             lines.append(f"**#{rank}** {display_users} - {team}, **{best:,}**")
         else:
@@ -984,7 +1008,6 @@ async def leaderboard_fastest(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard_longest", description="Shows longest two-person runs across attempts.")
 async def leaderboard_longest(interaction: discord.Interaction):
-    # collect (duration_secs, team, attempt_index, runners_display)
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
@@ -993,7 +1016,6 @@ async def leaderboard_longest(interaction: discord.Interaction):
                 for rec in two_runs:
                     dur = int(rec.get("duration", 0))
                     runners = rec.get("runners", ())
-                    # convert runners ids to display names
                     names = [get_display_name(u) for u in runners]
                     runners_display = " & ".join(names[:2])
                     entries.append((dur, team, idx, runners_display))
@@ -1002,7 +1024,6 @@ async def leaderboard_longest(interaction: discord.Interaction):
         await interaction.response.send_message("No two-person run data available yet.")
         return
 
-    # sort descending by duration
     entries.sort(key=lambda x: -x[0])
 
     lines = []
