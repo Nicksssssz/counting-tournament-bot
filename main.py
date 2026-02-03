@@ -107,7 +107,7 @@ last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=TWO_PERSON_DETECT
 two_person_runs = {}
 
 # history of two-person runs during the attempt, per channel
-# structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs } , ... ]
+# structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs }]
 run_two_person_history_per_channel = defaultdict(list)
 
 # background task references (so /end_run can cancel them)
