@@ -94,7 +94,7 @@ run_user_counts_by_channel = defaultdict(lambda: defaultdict(int))
 # per-channel per-user sampled snapshots lists
 run_user_snapshots_per_channel = defaultdict(lambda: defaultdict(list))
 
-# last 40 senders per channel (to detect 2-person start) <- changed from 50 to 40
+# last 40 senders per channel (to detect 2-person start)
 last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=40))
 
 # two-person run state per channel
@@ -104,6 +104,10 @@ two_person_runs = {}
 # history of two-person runs during the attempt, per channel
 # structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs } , ... ]
 run_two_person_history_per_channel = defaultdict(list)
+
+# background task references (so /end_run can cancel them)
+run_timer_task = None
+run_sampler_task = None
 
 counts_lock = asyncio.Lock()
 
@@ -358,10 +362,13 @@ async def on_message(message: discord.Message):
 
 # -------- RUN TIMER --------
 async def run_timer(channel: discord.abc.Messageable):
-    global run_active, current_run_team
+    global run_active, current_run_team, run_timer_task
 
+    # original sleep duration preserved
     await asyncio.sleep(60*15)
 
+    # When the timer completes naturally, perform the same finalization as /end_run does
+    # (the logic below is unchanged and mirrors the end-run flow)
     async with counts_lock:
         run_active = False
 
@@ -466,8 +473,7 @@ async def run_timer(channel: discord.abc.Messageable):
                     longest_runners = rec["runners"]
                     longest_channel = ch
 
-        # --- NEW: determine participants for the best 1-hour window ---
-        # We'll find the two users who contributed the most during that window in best_channel.
+        # --- determine participants for the best 1-hour window ---
         best_participants_display = ""
         if best_channel is not None and best_1hour > 0:
             snaps = run_user_snapshots_per_channel.get(best_channel, {})
@@ -480,7 +486,6 @@ async def run_timer(channel: discord.abc.Messageable):
                 if len(lst) > end_idx:
                     delta = lst[end_idx] - lst[start_idx]
                 else:
-                    # if snapshot list is short, attempt safe access
                     try:
                         end_val = lst[end_idx] if end_idx < len(lst) else lst[-1]
                         start_val = lst[start_idx] if start_idx < len(lst) else lst[0]
@@ -516,10 +521,8 @@ async def run_timer(channel: discord.abc.Messageable):
     # get channel mention (clickable) if possible
     if best_channel is not None:
         best_channel_mention = f"<#{best_channel}>"
-        best_start_text = format_duration(best_start_seconds)
     else:
         best_channel_mention = "N/A"
-        best_start_text = "00:00:00"
 
     # longest run display
     if longest_duration > 0 and longest_runners:
@@ -562,10 +565,13 @@ async def run_timer(channel: discord.abc.Messageable):
     run_two_person_history_per_channel.clear()
     current_run_team = None
 
+    # mark task variable as done
+    run_timer_task = None
+
 # -------- SLASH COMMANDS --------
 @bot.tree.command(name="run", description="Starts a run or shows current run status.")
 async def start_run(interaction: discord.Interaction):
-    global run_active, run_start_time, last_valid_user_id, current_run_team
+    global run_active, run_start_time, last_valid_user_id, current_run_team, run_timer_task, run_sampler_task
 
     async with counts_lock:
         if run_active:
@@ -628,9 +634,219 @@ async def start_run(interaction: discord.Interaction):
         "24 hours attempt started! Stats are now being collected."
     )
 
-    # start run timer and minute sampler
-    bot.loop.create_task(run_timer(interaction.channel))
-    bot.loop.create_task(minute_sampler())
+    # start run timer and minute sampler and keep references so /end_run can cancel them
+    run_timer_task = bot.loop.create_task(run_timer(interaction.channel))
+    run_sampler_task = bot.loop.create_task(minute_sampler())
+
+@bot.tree.command(name="end_run", description="Ends current run immediately. Emergency use only.")
+async def end_run(interaction: discord.Interaction, save: bool = True):
+    """
+    Ends the current run early.
+    Option 'save' boolean decides whether to save the attempt into team history and persist to disk.
+    """
+    global run_active, run_timer_task, run_sampler_task, current_run_team
+
+    async with counts_lock:
+        if not run_active:
+            await interaction.response.send_message("No active run to end.", ephemeral=True)
+            return
+
+        # cancel background tasks if present
+        if run_timer_task is not None and not run_timer_task.done():
+            run_timer_task.cancel()
+        if run_sampler_task is not None and not run_sampler_task.done():
+            run_sampler_task.cancel()
+
+        # Immediately perform the same finalization logic from run_timer
+        run_active = False
+
+        leaderboard_items = sorted(
+            run_counts_by_user.items(),
+            key=lambda x: -x[1]
+        )
+
+        mistakes_snapshot = dict(run_team_mistakes)
+        correct = sum(run_counts_by_user.values())
+        incorrect = sum(mistakes_snapshot.values())
+        total_attempts = correct + incorrect
+
+        # compute numeric accuracy value (percent)
+        acc_value = format_accuracy_value(correct, incorrect)
+
+        # compute best 1-hour sliding-window delta per channel using run_snapshots_per_channel
+        best_1hour = 0
+        best_channel = None
+        best_start_index = 0
+        window_samples = FASTEST_WINDOW_SECONDS // SAMPLE_INTERVAL_SECONDS
+        for ch, snapshots in run_snapshots_per_channel.items():
+            N = len(snapshots)
+            if N <= window_samples:
+                continue
+            for i in range(0, N - window_samples):
+                delta = snapshots[i + window_samples] - snapshots[i]
+                if delta > best_1hour:
+                    best_1hour = delta
+                    best_channel = ch
+                    best_start_index = i
+
+        best_start_seconds = best_start_index * SAMPLE_INTERVAL_SECONDS if best_channel is not None else 0
+
+        # determine top users for this run (up to 2) for storage
+        top_users_for_run = []
+        if leaderboard_items:
+            for uid, cnt in leaderboard_items:
+                team = get_user_team(uid)
+                if team == current_run_team:
+                    top_users_for_run.append(get_display_name(uid))
+                if len(top_users_for_run) >= 2:
+                    break
+
+        # finalize any still-active two-person runs as ending now and append to history
+        now_ts = time.time()
+        for ch, state in list(two_person_runs.items()):
+            if state.get("active"):
+                runners = state["runners"]
+                start_time = state["start_time"]
+                end_time = now_ts
+                duration = int(end_time - start_time)
+                # append record into run_two_person_history_per_channel
+                run_two_person_history_per_channel[ch].append({
+                    "runners": runners,
+                    "start": start_time,
+                    "end": end_time,
+                    "duration": duration
+                })
+                # clear the recent-senders deque for that channel so we don't immediately restart
+                last_50_senders_per_channel[ch].clear()
+        # prepare two_person_runs flattened summary for storing in attempt record
+        two_runs_flat = []
+        for ch, runs in run_two_person_history_per_channel.items():
+            for rec in runs:
+                two_runs_flat.append({
+                    "channel": ch,
+                    "runners": rec["runners"],
+                    "start": rec["start"],
+                    "end": rec["end"],
+                    "duration": rec["duration"]
+                })
+
+        if current_run_team and save:
+            # append attempt record for that team (include two_person_runs)
+            team_accuracy_history[current_run_team].append({
+                "correct": correct,
+                "incorrect": incorrect,
+                "accuracy": acc_value,
+                "best_1hour": best_1hour,
+                "best_1hour_start": best_start_seconds,
+                "top_users": top_users_for_run,
+                "two_person_runs": two_runs_flat
+            })
+
+        # persist data only if save=True
+        if save:
+            save_data()
+
+        # compute longest two-person run across channels for this attempt
+        longest_duration = 0
+        longest_runners = None
+        longest_channel = None
+        for ch, runs in run_two_person_history_per_channel.items():
+            for rec in runs:
+                if rec["duration"] > longest_duration:
+                    longest_duration = rec["duration"]
+                    longest_runners = rec["runners"]
+                    longest_channel = ch
+
+        # --- determine participants for the best 1-hour window ---
+        best_participants_display = ""
+        if best_channel is not None and best_1hour > 0:
+            snaps = run_user_snapshots_per_channel.get(best_channel, {})
+            start_idx = best_start_index
+            end_idx = best_start_index + window_samples
+            deltas = []
+            for uid, lst in snaps.items():
+                if len(lst) > end_idx:
+                    delta = lst[end_idx] - lst[start_idx]
+                else:
+                    try:
+                        end_val = lst[end_idx] if end_idx < len(lst) else lst[-1]
+                        start_val = lst[start_idx] if start_idx < len(lst) else lst[0]
+                        delta = end_val - start_val
+                    except Exception:
+                        delta = 0
+                deltas.append((delta, uid))
+            deltas.sort(key=lambda x: -x[0])
+            top_uids = [uid for d, uid in deltas if d > 0][:2]
+            if top_uids:
+                best_participants_display = " & ".join(f"**{get_display_name(u)}**" for u in top_uids)
+            else:
+                best_participants_display = "N/A"
+        else:
+            best_participants_display = "N/A"
+
+    # prepare display (outside counts_lock)
+    if total_attempts == 0:
+        accuracy_text = "N/A"
+    else:
+        accuracy_text = "100%" if acc_value == 100 else (format_accuracy_display(acc_value) if acc_value is not None else "N/A")
+
+    if not leaderboard_items:
+        leaderboard_text = "No numbers were counted."
+    else:
+        lines = []
+        for i, (uid, count) in enumerate(leaderboard_items, start=1):
+            name = get_display_name(uid)
+            lines.append(f"**#{i}** {name}, **{count:,}**")
+        leaderboard_text = "\n".join(lines)
+
+    # get channel mention (clickable) if possible
+    if best_channel is not None:
+        best_channel_mention = f"<#{best_channel}>"
+    else:
+        best_channel_mention = "N/A"
+
+    # longest run display
+    if longest_duration > 0 and longest_runners:
+        longest_duration_text = format_duration(longest_duration)
+        longest_participants = " & ".join(f"**{get_display_name(u)}**" for u in longest_runners)
+        longest_block = f"Longest run: **{longest_duration_text}**\nParticipants: {longest_participants}\n\n"
+    else:
+        longest_block = ""
+
+    # compute attempt number for the team (attempt #) — only meaningful if saved
+    attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
+
+    embed = discord.Embed(
+        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #{attempt_number} STATS:**",
+        description=(
+            f"Fastest 1-hour run: **{best_1hour:,}**\n"
+            f"Participants: {best_participants_display}\n\n"
+            f"{longest_block}"
+            f"Correct Rate: **{accuracy_text}**\n"
+            f"✅ **{correct:,}**\n"
+            f"❌ **{incorrect:,}**\n\n"
+            f"{leaderboard_text}"
+        ),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+    # clear run-only state (same as normal finalization)
+    async with counts_lock:
+        run_counts_by_user.clear()
+        run_team_mistakes.clear()
+        run_snapshots_per_channel.clear()
+        run_user_snapshots_per_channel.clear()
+        run_counts_by_channel.clear()
+        run_user_counts_by_channel.clear()
+        last_50_senders_per_channel.clear()
+        two_person_runs.clear()
+        run_two_person_history_per_channel.clear()
+        current_run_team = None
+        # clear task refs
+        run_timer_task = None
+        run_sampler_task = None
 
 @bot.tree.command(name="top_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
