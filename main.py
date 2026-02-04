@@ -823,7 +823,7 @@ async def start_run(interaction: discord.Interaction):
     run_timer_task = bot.loop.create_task(run_timer(interaction.channel))
     run_sampler_task = bot.loop.create_task(minute_sampler())
 
-@bot.tree.command(name="end_run", description="Ends current run immediately. Emergency use only.")
+@bot.tree.command(name="end_run", description="Ends current run immediately. Choose to save the data or not.")
 async def end_run(interaction: discord.Interaction, save: bool = True):
     """
     Ends the current run early.
