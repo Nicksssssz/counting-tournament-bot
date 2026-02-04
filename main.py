@@ -585,7 +585,7 @@ async def run_timer(channel: discord.abc.Messageable):
     attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
 
     embed = discord.Embed(
-        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #{attempt_number} STATS:**",
+        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'} ⅩⅩⅡ'S ATTEMPT #{attempt_number} STATS:**",
         description=(
             f"Fastest 1-hour run: **{best_1hour:,}**\n"
             f"Participants: {best_participants_display}\n\n"
