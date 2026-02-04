@@ -28,8 +28,7 @@ TRACK_CHANNELS = {
     1060539711871004734, #commands
     1315525836341907560, #classic col
     1315492435115114517, # contando col
-    1052340912216358993,  # juiz
-    1343071180327751720  # eba
+    1052340912216358993  # juiz
 }
 
 COMMANDS_CHANNEL_ID = 1060539711871004734
@@ -49,7 +48,8 @@ user_team_mapping = {
     749049630775312524: "eba",
     497517322206969856: "eba",
     709650885487099985: "eba",
-    333333333333333333: "CC"
+    333333333333333333: "CC",
+    444444444444444444: "DD"
 }
 
 # -------- NICKNAMES --------
@@ -108,7 +108,7 @@ last_50_senders_per_channel = defaultdict(lambda: deque(maxlen=TWO_PERSON_DETECT
 two_person_runs = {}
 
 # history of two-person runs during the attempt, per channel
-# structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs }]
+# structure: ch_id -> [ { "runners": (uid1, uid2), "start": ts, "end": ts, "duration": secs } , ... ]
 run_two_person_history_per_channel = defaultdict(list)
 
 # background task references (so /end_run can cancel them)
@@ -849,7 +849,7 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
     attempt_number = len(team_accuracy_history[current_run_team]) if current_run_team in team_accuracy_history else 1
 
     embed = discord.Embed(
-        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'} ⅩⅩⅡ'S ATTEMPT #{attempt_number} STATS:**",
+        title=f"**{current_run_team.upper() if current_run_team else 'NO TEAM'}'S ATTEMPT #{attempt_number} STATS:**",
         description=(
             f"Fastest 1-hour run: **{best_1hour:,}**\n"
             f"Participants: {best_participants_display}\n\n"
@@ -879,7 +879,6 @@ async def end_run(interaction: discord.Interaction, save: bool = True):
         run_timer_task = None
         run_sampler_task = None
 
-# -------- OTHER SLASH COMMANDS (leaderboards, show_data) kept unchanged --------
 @bot.tree.command(name="top_users", description="Shows total numbers counted by each user and which team they belong to.")
 async def leaderboard_users(interaction: discord.Interaction):
     async with counts_lock:
@@ -1033,6 +1032,112 @@ async def leaderboard_longest(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="**LONGEST RUN LEADERBOARD**",
+        description="\n".join(lines),
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+# -------- NEW: /points command --------
+@bot.tree.command(name="points", description="Shows points leaderboard from current winners of categories.")
+async def points_command(interaction: discord.Interaction):
+    """
+    Calculates points from current winners of:
+      - Fastest Run (1 point)
+      - Numbers Counted (2 points)
+      - Accuracy (1 point)
+      - Longest Run (1 point)
+
+    Displays teams sorted by points, listing categories they currently lead and their total points.
+    """
+    # compute winners for each category
+    fastest_winner = None
+    numbers_winner = None
+    accuracy_winner = None
+    longest_winner = None
+
+    async with counts_lock:
+        # Fastest Run winner: highest best_1hour across all team attempts
+        fastest_entries = []
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                best = int(run.get("best_1hour", 0) or 0)
+                if best > 0:
+                    fastest_entries.append((best, team, idx))
+        if fastest_entries:
+            fastest_entries.sort(key=lambda x: -x[0])
+            fastest_winner = fastest_entries[0][1]
+
+        # Numbers Counted winner: highest correct count across attempts
+        numbers_entries = []
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                correct = int(run.get("correct", 0) or 0)
+                if correct > 0:
+                    numbers_entries.append((correct, team, idx))
+        if numbers_entries:
+            numbers_entries.sort(key=lambda x: -x[0])
+            numbers_winner = numbers_entries[0][1]
+
+        # Accuracy winner: highest accuracy percent across attempts
+        accuracy_entries = []
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                acc = run.get("accuracy")
+                if acc is None:
+                    continue
+                accuracy_entries.append((float(acc), team, idx))
+        if accuracy_entries:
+            accuracy_entries.sort(key=lambda x: -x[0])
+            accuracy_winner = accuracy_entries[0][1]
+
+        # Longest Run winner: highest duration from two_person_runs across attempts
+        longest_entries = []
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                two_runs = run.get("two_person_runs", []) or []
+                for rec in two_runs:
+                    dur = int(rec.get("duration", 0) or 0)
+                    if dur > 0:
+                        longest_entries.append((dur, team, idx))
+        if longest_entries:
+            longest_entries.sort(key=lambda x: -x[0])
+            longest_winner = longest_entries[0][1]
+
+    # tally points
+    points = defaultdict(int)
+    winning_categories = defaultdict(list)
+
+    if fastest_winner:
+        points[fastest_winner] += 1
+        winning_categories[fastest_winner].append("Fastest Run")
+    if numbers_winner:
+        points[numbers_winner] += 2  # Numbers Counted worth 2 points
+        winning_categories[numbers_winner].append("Numbers Counted")
+    if accuracy_winner:
+        points[accuracy_winner] += 1
+        winning_categories[accuracy_winner].append("Accuracy")
+    if longest_winner:
+        points[longest_winner] += 1
+        winning_categories[longest_winner].append("Longest Run")
+
+    if not points:
+        await interaction.response.send_message("No winners available yet to calculate points.")
+        return
+
+    # build sorted leaderboard by points desc, then team name
+    leaderboard = sorted(points.items(), key=lambda x: (-x[1], x[0]))
+
+    lines = []
+    for i, (team, pts) in enumerate(leaderboard, start=1):
+        cats = ", ".join(winning_categories.get(team, []))
+        if cats:
+            lines.append(f"**#{i}** {team} - {cats}, **{pts}**")
+        else:
+            lines.append(f"**#{i}** {team}, **{pts}**")
+
+    embed = discord.Embed(
+        title="**POINTS LEADERBOARD**",
         description="\n".join(lines),
         color=0xCCA958
     )
