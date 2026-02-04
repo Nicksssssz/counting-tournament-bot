@@ -575,7 +575,7 @@ async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team, run_timer_task
 
     # original sleep duration preserved (kept same as you had)
-    await asyncio.sleep(60*15)
+    await asyncio.sleep(60*60*60*24)
 
     async with counts_lock:
         run_active = False
