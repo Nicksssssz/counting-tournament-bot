@@ -1155,6 +1155,71 @@ async def points_command(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+# -------- NEW: /all_runs command --------
+@bot.tree.command(name="all_runs", description="Shows summary of all saved runs (per team attempts).")
+async def all_runs(interaction: discord.Interaction):
+    """
+    Displays all saved runs in order (per team, in the order they were stored).
+    For each attempt shows:
+      - Numbers Counted (correct)
+      - Accuracy (formatted)
+      - Longest Run (HH:MM:SS)
+      - Fastest Run (best 1-hour)
+    """
+    entries = []
+    async with counts_lock:
+        # iterate teams in insertion order and their attempts in stored order
+        for team, runs in team_accuracy_history.items():
+            for idx, run in enumerate(runs, start=1):
+                correct = int(run.get("correct", 0) or 0)
+                acc = run.get("accuracy")
+                if acc is None:
+                    acc_text = "N/A"
+                else:
+                    acc_text = "100%" if acc == 100 else f"{float(acc):06.3f}%"
+                # longest run (max duration in two_person_runs)
+                two_runs = run.get("two_person_runs", []) or []
+                longest_secs = 0
+                for rec in two_runs:
+                    dur = int(rec.get("duration", 0) or 0)
+                    if dur > longest_secs:
+                        longest_secs = dur
+                longest_text = format_duration(longest_secs) if longest_secs > 0 else "N/A"
+                best_1hour = int(run.get("best_1hour", 0) or 0)
+                entries.append({
+                    "team": team,
+                    "attempt": idx,
+                    "correct": correct,
+                    "accuracy": acc_text,
+                    "longest": longest_text,
+                    "fastest": best_1hour
+                })
+
+    if not entries:
+        await interaction.response.send_message("No saved runs available yet.")
+        return
+
+    # build the message string
+    blocks = []
+    for e in entries:
+        team_label = e["team"].upper()
+        blocks.append(f"{team_label} #{e['attempt']} ATTEMPT")
+        blocks.append(f"Numbers Counted: **{e['correct']:,}**")
+        blocks.append(f"Accuracy **{e['accuracy']}**")
+        blocks.append(f"Longest Run: **{e['longest']}**")
+        blocks.append(f"Fastest Run: **{e['fastest']:,}**")
+        blocks.append("")  # blank line between attempts
+
+    desc = "\n".join(blocks).strip()
+
+    embed = discord.Embed(
+        title="**ALL SAVED RUNS**",
+        description=desc,
+        color=0xCCA958
+    )
+
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="show_data", description="Shows raw stored data.")
 async def show_data(interaction: discord.Interaction):
     if interaction.user.id != 749049630775312524:
