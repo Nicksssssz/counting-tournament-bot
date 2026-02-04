@@ -1028,7 +1028,7 @@ async def leaderboard_users(interaction: discord.Interaction):
     if not items:
         await interaction.response.send_message(
             "No data available yet.",
-            ephemeral=True
+            ephemeral=False
         )
         return
 
