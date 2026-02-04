@@ -25,10 +25,9 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 
 # -------- CHANNELS --------
 TRACK_CHANNELS = {
-    1060539711871004734, #commands
-    1315525836341907560, #classic col
-    1315492435115114517, # contando col
-    1052340912216358993  # juiz
+    1060539711871004734, # commands
+    1315525836341907560, # classic col
+    1315492435115114517  # contando col
 }
 
 COMMANDS_CHANNEL_ID = 1060539711871004734
@@ -44,13 +43,32 @@ TWO_PERSON_WARNING_MINUTES = 9       # send warning if last 9 minutes < TWO_PERS
 TWO_PERSON_CHECK_MINUTES = 10        # check inactivity over last 10 minutes
 
 # -------- TEAMS --------
-user_team_mapping = {
-    749049630775312524: "eba",
-    497517322206969856: "eba",
-    709650885487099985: "eba",
-    333333333333333333: "CC",
-    444444444444444444: "DD"
+teams = {
+    "eba": [
+        749049630775312524,
+        497517322206969856,
+        709650885487099985,
+    ],
+    "dxrk": [
+        1189250809020555344,
+    ],
+    "hope": [
+        903692413300793434,
+    ],
+    "ⅩⅩⅡ": [
+        485412155596996628,
+    ],
+    "Chicago Stix": [
+        895534695729725500,
+    ],
 }
+
+user_team_mapping = {
+    user_id: team
+    for team, users in teams.items()
+    for user_id in users
+}
+
 
 # -------- NICKNAMES --------
 user_nicknames = {
