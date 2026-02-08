@@ -176,7 +176,7 @@ run_team_mistakes = defaultdict(int)
 team_accuracy_history = defaultdict(list)
 
 # For fastest 1-hour sliding window analysis
-RUN_ANALYSIS_WINDOW_HOURS = 24   # total run duration (used for number of samples)
+RUN_ANALYSIS_WINDOW_HOURS = 24   # total run duration
 FASTEST_WINDOW_SECONDS = 3600   # 1 hour window
 SAMPLE_INTERVAL_SECONDS = 10    # keep this (sampling resolution)
 # per-channel snapshots (cumulative totals sampled during run every SAMPLE_INTERVAL_SECONDS)
