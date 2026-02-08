@@ -26,8 +26,8 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 
 # -------- CHANNELS --------
 TRACK_CHANNELS = {
-    1315525836341907560, # classic col
-    1315492435115114517  # contando col
+    1315525836341907560, # classic coliseum
+    1315492435115114517  # contando coliseum
 }
 
 COMMANDS_CHANNEL_ID = 1315525419813834783
@@ -44,26 +44,21 @@ TWO_PERSON_CHECK_MINUTES = 10        # check inactivity over last 10 minutes
 
 # -------- TEAMS --------
 teams = {
-    "eba": [749049630775312524, 497517322206969856, 709650885487099985, 665011985121017894, 992014751381065791,
-            1327841688147984558, 762417923574726667, 1189250809020555344, 91628137384808448, 1136159374511968438,
-            1267712959589912598, 875155347541721100, 593889062377488435, 855351859039174677, 1200505072493285544,
-            1290390298958233720, 848670503182794763, 514078286146699265, 1275494343293272166, 177013970895503360,
-            903692413300793434, 747859758354137128, 713936728481857637, 1063269856251740180, 1156662987357171854,
-            586031901207166976, 890989360701386754, 770794762780409856, 249881368945885184, 1137835454671097906,
-            832596613922684968, 1146434565179723899, 495708539462090762, 885123109630406706, 904224456677945364,
-            547612876530122763, 1403694438143889498, 1221444926819270763, 895534695729725500, 577666133549645834,
-            735957682913017866, 668223790500544512, 485412155596996628, 154721499159199744, 572231874525659189,
-            456613134682030081, 953238846852702238, 392459609283100672, 130452258864234496, 817022469004984340,
-            784701362536448001, 484484139349835781, 815837012648919050, 520341628049686538, 886617454867013642,
-            655855955304644629, 309840548695638026, 1198658950082609299, 1178268672373030975, 1274417682975952948
+    "Space Walkers": [1189250809020555344, 904224456677945364, 577666133549645834, 497517322206969856, 832596613922684968,
+             495708539462090762, 665011985121017894, 514078286146699265, 1063269856251740180, 520341628049686538,
+             1221444926819270763, 762417923574726667, 1156662987357171854, 885123109630406706, 1274417682975952948
     ],
-    "dxrk": [1,
+    "Hope's team": [903692413300793434, 586031901207166976, 992014751381065791, 770794762780409856, 1275494343293272166,
+             713936728481857637, 1198658950082609299, 130452258864234496, 875155347541721100, 1136159374511968438,
+             890989360701386754, 91628137384808448, 572231874525659189, 1200505072493285544, 817022469004984340
     ],
-    "hope": [2,
+    "ⅩⅩⅡ": [485412155596996628, 1327841688147984558, 593889062377488435, 1267712959589912598, 855351859039174677,
+             668223790500544512, 456613134682030081, 1146434565179723899, 953238846852702238, 1137835454671097906,
+             249881368945885184, 641706102312140800, 484484139349835781, 392459609283100672, 735957682913017866
     ],
-    "ⅩⅩⅡ": [3,
-    ],
-    "Chicago Stix": [4,
+    "Chicago Stix": [895534695729725500, 709650885487099985, 749049630775312524, 1178268672373030975,784701362536448001,
+                     886617454867013642, 547612876530122763, 309840548695638026, 747859758354137128, 848670503182794763,
+                     1290390298958233720, 655855955304644629, 815837012648919050, 1403694438143889498, 154721499159199744
     ]
 }
 
@@ -76,67 +71,21 @@ user_team_mapping = {
 
 # -------- NICKNAMES --------
 user_nicknames = {
-    749049630775312524:  "nicks",
-    497517322206969856:  "isa",
-    709650885487099985:  "gab",
-    665011985121017894:  "nicoel",
-    992014751381065791:  "khyma",
-    1327841688147984558: "thiran",
-    762417923574726667:  "logan",
-    1189250809020555344: "dark",
-    91628137384808448:   "A*",
-    1136159374511968438: "ama",
-    1267712959589912598: "arya",
-    875155347541721100:  "axo",
-    593889062377488435:  "azure",
-    855351859039174677:  "bertl",
-    1200505072493285544: "claret",
-    1290390298958233720: "cobrakai",
-    848670503182794763:  "deepblue",
-    514078286146699265:  "digi",
-    1275494343293272166: "dodge",
-    177013970895503360:  "duck",
-    903692413300793434:  "hope",
-    747859758354137128:  "iron",
-    713936728481857637:  "jake",
-    1063269856251740180: "james",
-    1156662987357171854: "jdubs",
-    586031901207166976:  "kailee",
-    890989360701386754:  "korl",
-    770794762780409856:  "leaw",
-    249881368945885184:  "leti",
-    1137835454671097906: "lost",
-    832596613922684968:  "maddie",
-    1146434565179723899: "lite",
-    495708539462090762:  "marcin",
-    885123109630406706:  "milk",
-    904224456677945364:  "nai",
-    547612876530122763:  "nap",
-    1403694438143889498: "nssleo",
-    1221444926819270763: "sonic",
-    895534695729725500: "stick",
-    577666133549645834:  "onyan",
-    735957682913017866:  "onyx",
-    668223790500544512:  "pia",
-    485412155596996628:  "quv",
-    154721499159199744:  "raydop",
-    572231874525659189:  "rreae",
-    456613134682030081:  "sall",
-    953238846852702238:  "salt",
-    392459609283100672:  "saud",
-    130452258864234496:  "scan",
-    817022469004984340:  "schpark",
-    784701362536448001: "shelley",
-    484484139349835781:  "skilo",
-    815837012648919050:  "super",
-    520341628049686538: "trashcore",
-    886617454867013642: "zgames",
-    655855955304644629: "robby",
-    309840548695638026: "w0rd",
-    1198658950082609299:"storydreamer",
-    1178268672373030975:"willy",
-    1274417682975952948:"bruce",
-    641706102312140800: "ec"
+    749049630775312524:  "nicks",    497517322206969856:  "isa",    709650885487099985:  "gab",    665011985121017894:  "nicoel",
+    992014751381065791:  "khyma",    1327841688147984558: "thiran", 762417923574726667:  "logan",  1189250809020555344: "dark",
+    91628137384808448:   "A*",       1136159374511968438: "ama",    1267712959589912598: "arya",   875155347541721100:  "axo",
+    593889062377488435:  "azure",    855351859039174677:  "bertl",  1200505072493285544: "claret", 1290390298958233720: "cobrakai",
+    848670503182794763:  "deepblue", 514078286146699265:  "digi",   1275494343293272166: "dodge",  641706102312140800:  "ec",
+    903692413300793434:  "hope",     747859758354137128:  "iron",   713936728481857637:  "jake",   1063269856251740180: "james",
+    1156662987357171854: "jdubs",    586031901207166976:  "kailee", 890989360701386754:  "korl",   770794762780409856:  "leaw",
+    249881368945885184:  "leti",     1137835454671097906: "lost",   832596613922684968:  "maddie", 1146434565179723899: "lite",
+    495708539462090762:  "marcin",   885123109630406706:  "milk",   904224456677945364:  "nai",    547612876530122763:  "nap",
+    1403694438143889498: "nssleo",   1221444926819270763: "sonic",  895534695729725500: "stick",   577666133549645834:  "onyan",
+    735957682913017866:  "onyx",     668223790500544512:  "pia",    485412155596996628:  "quv",    154721499159199744:  "raydop",
+    572231874525659189:  "rreae",    456613134682030081:  "sall",   953238846852702238:  "salt",   392459609283100672:  "saud",
+    130452258864234496:  "scan",     817022469004984340:  "schpark", 484484139349835781:  "skilo", 784701362536448001: "shelley", 
+    815837012648919050:  "super",    520341628049686538: "trashcore", 886617454867013642: "zgames", 655855955304644629: "robby",
+    309840548695638026:  "w0rd",     1198658950082609299:"storydreamer", 1178268672373030975:"willy", 1274417682975952948:"bruce"
 }
 
 # -------- ALTS --------
@@ -149,6 +98,7 @@ alt_to_main = {
     1207827979451768862: 665011985121017894, # nicoel
     
     1176872999287279710: 992014751381065791, # "khyma"
+    1250914738603557016: 992014751381065791, # "khyma2"
     1347500051441909760: 1327841688147984558,# "thiran"
     1: 762417923574726667, # "logan"
     1189255952797536339: 1189250809020555344,# "dark"
@@ -350,12 +300,7 @@ def _append_two_person_history(ch: int, runners: tuple, start_ts: float, end_ts:
     })
 
 async def finalize_two_person_run(ch: int, *, end_ts: float = None, clear_deque: bool = True, announce_in_commands: bool = True):
-    """
-    Finalize an active two-person run in channel ch.
-    - end_ts: optional explicit end timestamp (defaults to now)
-    - clear_deque: if True, clear the last-N deque to avoid immediate restart
-    - announce_in_commands: if True, post a 'Run ended' message to the commands channel
-    """
+
     if end_ts is None:
         end_ts = time.time()
     state = two_person_runs.get(ch)
@@ -384,13 +329,7 @@ async def finalize_two_person_run(ch: int, *, end_ts: float = None, clear_deque:
 
 # -------- SECONDARY SAMPLER TASK (every SAMPLE_INTERVAL_SECONDS) --------
 async def minute_sampler():
-    """
-    Samples cumulative run counts once immediately at start, then every SAMPLE_INTERVAL_SECONDS seconds
-    up to RUN_ANALYSIS_WINDOW_HOURS hours (or until the run ends).
-    Stores per-channel cumulative snapshots into run_snapshots_per_channel and per-user snapshots into run_user_snapshots_per_channel.
-    Also checks active two-person runs every sample (to enforce TWO_PERSON_MIN_COUNT numbers in last TWO_PERSON_CHECK_MINUTES).
-    Sends a 9-minute warning when appropriate.
-    """
+ 
     total_samples = (RUN_ANALYSIS_WINDOW_HOURS * 3600) // SAMPLE_INTERVAL_SECONDS
     # initial snapshot at time 0 for each tracked channel
     async with counts_lock:
@@ -827,10 +766,7 @@ async def start_run(interaction: discord.Interaction):
 
 @bot.tree.command(name="end_run", description="Ends the current run early. Choose to save the data or not.")
 async def end_run(interaction: discord.Interaction, save: bool = True):
-    """
-    Ends the current run early.
-    Option 'save' boolean decides whether to save the attempt into team history and persist to disk.
-    """
+
     global run_active, run_timer_task, run_sampler_task, current_run_team
 
     async with counts_lock:
@@ -1147,10 +1083,7 @@ async def leaderboard_fastest(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard_longest", description="Shows longest two-person runs (best per attempt).")
 async def leaderboard_longest(interaction: discord.Interaction):
-    """
-    For each attempt (team + attempt index) pick the single longest two-person run inside that attempt,
-    then rank those best-per-attempt runs across all attempts (similar to leaderboard_fastest).
-    """
+
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
@@ -1188,15 +1121,7 @@ async def leaderboard_longest(interaction: discord.Interaction):
 # -------- NEW: /points command --------
 @bot.tree.command(name="points", description="Shows points leaderboard from current winners of categories.")
 async def points_command(interaction: discord.Interaction):
-    """
-    Calculates points from current winners of:
-      - Fastest Run (1 point)
-      - Numbers Counted (2 points)
-      - Accuracy (1 point)
-      - Longest Run (1 point)
 
-    Displays teams sorted by points, listing categories they currently lead and their total points.
-    """
     # compute winners for each category
     fastest_winner = None
     numbers_winner = None
@@ -1294,16 +1219,9 @@ async def points_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 # -------- NEW: /all_runs command --------
-@bot.tree.command(name="all_runs", description="Shows summary of all saved runs (per team attempts).")
+@bot.tree.command(name="all_runs", description="Shows summary of all attempts so far.")
 async def all_runs(interaction: discord.Interaction):
-    """
-    Displays all saved runs in order (per team, in the order they were stored).
-    For each attempt shows:
-      - Numbers Counted (correct)
-      - Accuracy (formatted)
-      - Longest Run (HH:MM:SS)
-      - Fastest Run (best 1-hour)
-    """
+
     entries = []
     async with counts_lock:
         # iterate teams in insertion order and their attempts in stored order
@@ -1334,7 +1252,7 @@ async def all_runs(interaction: discord.Interaction):
                 })
 
     if not entries:
-        await interaction.response.send_message("No saved runs available yet.")
+        await interaction.response.send_message("No saved attempts available yet.")
         return
 
     # build the message string
@@ -1351,7 +1269,7 @@ async def all_runs(interaction: discord.Interaction):
     desc = "\n".join(blocks).strip()
 
     embed = discord.Embed(
-        title="**ALL SAVED RUNS**",
+        title="**ALL RUNS**",
         description=desc,
         color=0xCCA958
     )
