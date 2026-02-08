@@ -7,6 +7,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict, deque
+import io
 
 # -------- ENV --------
 load_dotenv()
@@ -113,7 +114,7 @@ user_nicknames = {
     547612876530122763:  "nap",
     1403694438143889498: "nssleo",
     1221444926819270763: "sonic",
-    895534695729725500:  "stick",
+    895534695729725500: "stick",
     577666133549645834:  "onyan",
     735957682913017866:  "onyx",
     668223790500544512:  "pia",
@@ -126,15 +127,16 @@ user_nicknames = {
     130452258864234496:  "scan",
     817022469004984340:  "schpark",
     784701362536448001: "shelley",
-    484484139349835781: "skilo",
-    815837012648919050: "super",
+    484484139349835781:  "skilo",
+    815837012648919050:  "super",
     520341628049686538: "trashcore",
     886617454867013642: "zgames",
-    655855955304644629: "kazuma",
+    655855955304644629: "robby",
     309840548695638026: "w0rd",
     1198658950082609299:"storydreamer",
     1178268672373030975:"willy",
-    1274417682975952948:"bruce"
+    1274417682975952948:"bruce",
+    641706102312140800: "ec"
 }
 
 # -------- ALTS --------
@@ -153,6 +155,7 @@ alt_to_main = {
     0: 91628137384808448,  # "A*"
     305414646972809216: 1136159374511968438, # "ama"
     1414033725045473281: 1267712959589912598,# "arya"
+    1469199696135454831: 1267712959589912598,# "arya"
     1079617884633968720: 875155347541721100, # "axo"
     1248216922760151075: 593889062377488435, # "azure"
     1222912258594705519: 855351859039174677, # "bertl"
@@ -165,7 +168,7 @@ alt_to_main = {
     1214592526510456872: 903692413300793434, # "hope"
     1082448603789922386: 747859758354137128, # "iron"
     955603875421904966: 713936728481857637,  # "jake"
-    0: 1063269856251740180,# "james"
+    1310698295642820608: 1063269856251740180,# "james"
     1348389360122466347: 1156662987357171854,# "jdubs"
     419233067312611329: 586031901207166976,  # "kailee"
     936197474115276810: 890989360701386754,  # "korl"
@@ -197,7 +200,7 @@ alt_to_main = {
     1: 815837012648919050, # "super"
     964996735908843520: 520341628049686538,  # "trashcore"
     1146121542560927905: 886617454867013642, # "zgames"
-    0: 655855955304644629, # "kazuma"
+    1336180081500094536: 655855955304644629, # "kazuma"
     0: 309840548695638026, # "w0rd"
     0: 1198658950082609299,# "storydreamer"
     1065819724082065489: 1178268672373030975,# "willy"
@@ -574,7 +577,7 @@ async def run_timer(channel: discord.abc.Messageable):
     global run_active, current_run_team, run_timer_task
 
     # original sleep duration preserved (kept same as you had)
-    await asyncio.sleep(60*60*60*24)
+    await asyncio.sleep(60*60*24)
 
     async with counts_lock:
         run_active = False
@@ -822,7 +825,7 @@ async def start_run(interaction: discord.Interaction):
     run_timer_task = bot.loop.create_task(run_timer(interaction.channel))
     run_sampler_task = bot.loop.create_task(minute_sampler())
 
-@bot.tree.command(name="end_run", description="Ends current run immediately. Choose to save the data or not.")
+@bot.tree.command(name="end_run", description="Ends the current run early. Choose to save the data or not.")
 async def end_run(interaction: discord.Interaction, save: bool = True):
     """
     Ends the current run early.
@@ -1142,19 +1145,26 @@ async def leaderboard_fastest(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="leaderboard_longest", description="Shows longest two-person runs across attempts.")
+@bot.tree.command(name="leaderboard_longest", description="Shows longest two-person runs (best per attempt).")
 async def leaderboard_longest(interaction: discord.Interaction):
+    """
+    For each attempt (team + attempt index) pick the single longest two-person run inside that attempt,
+    then rank those best-per-attempt runs across all attempts (similar to leaderboard_fastest).
+    """
     entries = []
     async with counts_lock:
         for team, runs in team_accuracy_history.items():
             for idx, run in enumerate(runs, start=1):
                 two_runs = run.get("two_person_runs", []) or []
-                for rec in two_runs:
-                    dur = int(rec.get("duration", 0))
-                    runners = rec.get("runners", ())
-                    names = [get_display_name(u) for u in runners]
-                    runners_display = " & ".join(names[:2])
-                    entries.append((dur, team, idx, runners_display))
+                if not two_runs:
+                    continue
+                # pick the single longest two-person run inside this attempt
+                max_rec = max(two_runs, key=lambda r: int(r.get("duration", 0) or 0))
+                dur = int(max_rec.get("duration", 0) or 0)
+                runners = max_rec.get("runners", ())
+                names = [get_display_name(u) for u in runners]
+                runners_display = " & ".join(names[:2]) if names else "N/A"
+                entries.append((dur, team, idx, runners_display))
 
     if not entries:
         await interaction.response.send_message("No two-person run data available yet.")
@@ -1228,15 +1238,17 @@ async def points_command(interaction: discord.Interaction):
             accuracy_entries.sort(key=lambda x: -x[0])
             accuracy_winner = accuracy_entries[0][1]
 
-        # Longest Run winner: highest duration from two_person_runs across attempts
+        # Longest Run winner: highest duration from two_person_runs across attempts (best per attempt already handled by leaderboard_longest)
         longest_entries = []
         for team, runs in team_accuracy_history.items():
             for idx, run in enumerate(runs, start=1):
                 two_runs = run.get("two_person_runs", []) or []
-                for rec in two_runs:
-                    dur = int(rec.get("duration", 0) or 0)
-                    if dur > 0:
-                        longest_entries.append((dur, team, idx))
+                if not two_runs:
+                    continue
+                max_rec = max(two_runs, key=lambda r: int(r.get("duration", 0) or 0))
+                dur = int(max_rec.get("duration", 0) or 0)
+                if dur > 0:
+                    longest_entries.append((dur, team, idx))
         if longest_entries:
             longest_entries.sort(key=lambda x: -x[0])
             longest_winner = longest_entries[0][1]
@@ -1363,8 +1375,11 @@ async def show_data(interaction: discord.Interaction):
 
     pretty = json.dumps(data_snapshot, indent=2)
 
+    # send as a file to avoid message length limits
+    bio = io.BytesIO(pretty.encode("utf-8"))
+    bio.seek(0)
     await interaction.response.send_message(
-        f"```json\n{pretty}\n```",
+        file=discord.File(fp=bio, filename="run_data.json"),
         ephemeral=True
     )
 
